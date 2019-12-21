@@ -11,12 +11,15 @@ project "test1"
     pchsource "src/pch.cpp"
 
     libdirs {
-        "$(VULKAN_SDK)/Lib",
         "external/glfw/lib-vc2019"
     }
     links {
-        "vulkan-1",
         "glfw3"
+    }
+
+    defines {
+        "VOLK_STATIC_DEFINES",
+        "VK_USE_PLATFORM_WIN32_KHR"
     }
 
     includedirs {
@@ -30,8 +33,8 @@ project "test1"
     files {
         "external/glfw/include/**.h",
         "external/glm/glm/**.hpp",
-        "external/volk/volk.c",
         "external/volk/volk.h",
+        "external/volk/volk.c",
         "src/**.h",
         "src/**.cpp"
     }
