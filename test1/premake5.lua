@@ -10,6 +10,15 @@ project "test1"
     pchheader "pch.h"
     pchsource "src/pch.cpp"
 
+    libdirs {
+        "$(VULKAN_SDK)/Lib",
+        "external/glfw/lib-vc2019"
+    }
+    links {
+        "vulkan-1",
+        "glfw3"
+    }
+
     includedirs {
         "external/glfw/include",
         "external/glm",
@@ -33,14 +42,6 @@ project "test1"
     flags { "NoPCH" }
 
 
-    libdirs {
-        "$(VULKAN_SDK)/Lib",
-        "external/glfw/lib-vc2019"
-    }
-    links {
-        "vulkan-1",
-        "glfw3"
-    }
 
     filter "platforms:Win64"
         system "Windows"
