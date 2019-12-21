@@ -6,6 +6,10 @@ project "test1"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
+
+    pchheader "pch.h"
+    pchsource "src/pch.cpp"
+
     includedirs {
         "external/glfw/include",
         "external/glm",
@@ -13,6 +17,7 @@ project "test1"
         "$(VULKAN_SDK)/Include",
         "src"
     }
+
     files {
         "external/glfw/include/**.h",
         "external/glm/glm/**.hpp",
@@ -21,6 +26,12 @@ project "test1"
         "src/**.h",
         "src/**.cpp"
     }
+
+    filter {
+        "files:external/volk/volk.c"
+    }
+    flags { "NoPCH" }
+
 
     libdirs {
         "$(VULKAN_SDK)/Lib",

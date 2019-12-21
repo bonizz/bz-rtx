@@ -750,12 +750,18 @@
     <ClInclude Include="external\volk\volk.h">
       <Filter>external\volk</Filter>
     </ClInclude>
+    <ClInclude Include="src\pch.h">
+      <Filter>src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="external\volk\volk.c">
       <Filter>external\volk</Filter>
     </ClCompile>
     <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\pch.cpp">
       <Filter>src</Filter>
     </ClCompile>
   </ItemGroup>
