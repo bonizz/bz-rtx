@@ -1,0 +1,5 @@
+*.swp
+
+.vs/
+bin/
+obj/
