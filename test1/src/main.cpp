@@ -1,12 +1,20 @@
 
 #include "pch.h"
 
+void DebugPrint(const char* fmt, ...);
+
+#define BASSERT(expr) ((void)((!!(expr)) || \
+        ((DebugPrint("Error: %s, %s:%d\n", #expr, __FILE__, __LINE__),1) \
+         && (__debugbreak(),0)) ))
+
+
+
+
 #define VK_CHECK(_error) do { \
     if (_error != VK_SUCCESS) { \
-        assert(false && ##_error); \
+        BASSERT(false && #_error); \
     } \
 } while (false)
-
 
 const char* kAppName = "test vulkan app";
 bool kEnableValidation = true;
@@ -32,6 +40,7 @@ VkPhysicalDeviceMemoryProperties g_physicalDeviceMemoryProperties;
 std::vector<VkCommandBuffer> g_commandBuffers;
 VkSemaphore g_semaphoreAcquired;
 VkSemaphore g_semaphoreRenderFinished;
+VkDebugReportCallbackEXT g_debugCallback;
 
 
 
@@ -46,6 +55,26 @@ struct ImageVulkan
 
 ImageVulkan g_offscreenImage;
 
+void DebugPrint(const char* fmt, ...)
+{
+    char buffer[512] = {};
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf_s(buffer, std::size(buffer), _TRUNCATE, fmt, args);
+    OutputDebugStringA(buffer);
+    va_end(args);
+}
+
+
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT flags,
+        VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location,
+        int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
+{
+    BASSERT(0 && "validation error");
+
+    return VK_FALSE;
+}
 
 
 VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
@@ -140,6 +169,17 @@ bool init()
     }
 
     volkLoadInstance(g_instance);
+
+    {
+        VkDebugReportCallbackCreateInfoEXT callbackCreateInfo = { VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT };
+        callbackCreateInfo.flags =
+            VK_DEBUG_REPORT_ERROR_BIT_EXT |
+            VK_DEBUG_REPORT_WARNING_BIT_EXT |
+            VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+        callbackCreateInfo.pfnCallback = debugReportCallback;
+
+        VK_CHECK(vkCreateDebugReportCallbackEXT(g_instance, &callbackCreateInfo, nullptr, &g_debugCallback));
+    }
 
     uint32_t numPhysicalDevices = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(g_instance, &numPhysicalDevices, nullptr));
