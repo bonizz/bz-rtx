@@ -12,7 +12,7 @@ void DebugPrint(const char* fmt, ...);
 
 #define VK_CHECK(_error) do { \
     if (_error != VK_SUCCESS) { \
-        BASSERT(false && #_error); \
+        BASSERT(!#_error); \
     } \
 } while (false)
 
@@ -71,7 +71,21 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT flags,
         VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location,
         int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
 {
-    BASSERT(0 && "validation error");
+    if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT)
+    {
+        DebugPrint("Validation Error: [%s] %s", pLayerPrefix, pMessage);
+        BASSERT(!"validation error");
+
+    }
+    else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT)
+    {
+        DebugPrint("Validation Warning: [%s] %s", pLayerPrefix, pMessage);
+        BASSERT(!"validation error");
+    }
+    else
+    {
+        DebugPrint("Validation Performance Warning: [%s] %s", pLayerPrefix, pMessage);
+    }
 
     return VK_FALSE;
 }
@@ -254,6 +268,9 @@ bool init()
     surfaceCreateInfo.hwnd = glfwGetWin32Window(g_window);
 
     VK_CHECK(vkCreateWin32SurfaceKHR(g_instance, &surfaceCreateInfo, nullptr, &g_surface));
+
+    VkBool32 supportPresent = VK_FALSE;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceSupportKHR(g_physicalDevice, g_queueIndex, g_surface, &supportPresent));
 
     uint32_t surfaceFormatCount;
     vkGetPhysicalDeviceSurfaceFormatsKHR(g_physicalDevice, g_surface, &surfaceFormatCount, nullptr);
