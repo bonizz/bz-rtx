@@ -11,6 +11,9 @@
 const char* kAppName = "test vulkan app";
 bool kEnableValidation = true;
 
+uint32_t kWindowWidth = 800;
+uint32_t kWindowHeight = 600;
+
 GLFWwindow* g_window;
 VkInstance g_instance;
 VkPhysicalDevice g_physicalDevice;
@@ -23,9 +26,27 @@ VkSurfaceFormatKHR g_surfaceFormat;
 VkSwapchainKHR g_swapchain;
 std::vector<VkImage> g_swapchainImages;
 std::vector<VkImageView> g_swapchainImageViews;
+std::vector<VkFence> g_waitForFrameFences;
+VkCommandPool g_commandPool;
+VkPhysicalDeviceMemoryProperties g_physicalDeviceMemoryProperties;
+std::vector<VkCommandBuffer> g_commandBuffers;
+VkSemaphore g_semaphoreAcquired;
+VkSemaphore g_semaphoreRenderFinished;
 
-uint32_t kWindowWidth = 800;
-uint32_t kWindowHeight = 600;
+
+
+struct ImageVulkan
+{
+    VkFormat format;
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView imageView;
+    VkSampler sampler;
+};
+
+ImageVulkan g_offscreenImage;
+
+
 
 VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
 {
@@ -43,6 +64,26 @@ VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR su
             return mode;
 
     return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+uint32_t getMemoryType(VkMemoryRequirements& memoryRequirements, VkMemoryPropertyFlags memoryProperties)
+{
+    uint32_t result = 0;
+
+    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++)
+    {
+        if (memoryRequirements.memoryTypeBits & (1 << i))
+        {
+            if ((g_physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & memoryProperties)
+                    == memoryProperties)
+            {
+                result = i;
+                break;
+            }
+        }
+    }
+
+    return result;
 }
 
 bool init()
@@ -251,6 +292,103 @@ bool init()
 
         VK_CHECK(vkCreateImageView(g_device, &imageViewCreateInfo, nullptr, &g_swapchainImageViews[i]));
     }
+
+    VkFenceCreateInfo fenceCreateInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    g_waitForFrameFences.resize(g_swapchainImages.size());
+    for (auto& fence : g_waitForFrameFences)
+        vkCreateFence(g_device, &fenceCreateInfo, nullptr, &fence);
+
+    VkCommandPoolCreateInfo commandPoolCreateInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolCreateInfo.queueFamilyIndex = g_queueIndex;
+
+    VK_CHECK(vkCreateCommandPool(g_device, &commandPoolCreateInfo, nullptr, &g_commandPool));
+
+    vkGetPhysicalDeviceMemoryProperties(g_physicalDevice, &g_physicalDeviceMemoryProperties);
+
+    {
+        VkExtent3D imageExtent = { kWindowWidth, kWindowHeight, 1 };
+    //VkResult error = mOffscreenImage.Create(VK_IMAGE_TYPE_2D,
+    //                                        mSurfaceFormat.format,
+    //                                        extent,
+    //                                        VK_IMAGE_TILING_OPTIMAL,
+    //                                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    //                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        auto& img = g_offscreenImage;
+        img = {};
+
+        img.format = g_surfaceFormat.format;
+
+        VkImageCreateInfo imageCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        imageCreateInfo.flags = 0;
+        imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageCreateInfo.format = img.format;
+        imageCreateInfo.extent = imageExtent;
+        imageCreateInfo.mipLevels = 1;
+        imageCreateInfo.arrayLayers = 1;
+        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageCreateInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageCreateInfo.queueFamilyIndexCount = 0;
+        imageCreateInfo.pQueueFamilyIndices = nullptr;
+        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VK_CHECK(vkCreateImage(g_device, &imageCreateInfo, nullptr, &img.image));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetImageMemoryRequirements(g_device, img.image, &memoryRequirements);
+
+        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memoryAllocateInfo, nullptr, &img.memory));
+
+        VK_CHECK(vkBindImageMemory(g_device, img.image, img.memory, 0));
+
+        VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+//    error = mOffscreenImage.CreateImageView(VK_IMAGE_VIEW_TYPE_2D, mSurfaceFormat.format, range);
+//
+        VkImageViewCreateInfo imageViewCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        imageViewCreateInfo.format = img.format;
+        imageViewCreateInfo.subresourceRange = range;
+        imageViewCreateInfo.image = img.image;
+        imageViewCreateInfo.flags = 0;
+        imageViewCreateInfo.components = {
+            VK_COMPONENT_SWIZZLE_R,
+            VK_COMPONENT_SWIZZLE_G,
+            VK_COMPONENT_SWIZZLE_B,
+            VK_COMPONENT_SWIZZLE_A
+        };
+
+        VK_CHECK(vkCreateImageView(g_device, &imageViewCreateInfo, nullptr, &img.imageView));
+    }
+
+    {
+        g_commandBuffers.resize(g_swapchainImages.size());
+
+        VkCommandBufferAllocateInfo info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+        info.commandPool = g_commandPool;
+        info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        info.commandBufferCount = uint32_t(g_commandBuffers.size());
+
+        VK_CHECK(vkAllocateCommandBuffers(g_device, &info, g_commandBuffers.data()));
+    }
+
+    {
+        VkSemaphoreCreateInfo info = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        info.flags = 0;
+
+        VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreAcquired));
+        VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreRenderFinished));
+    }
+
 
 
     return true;
