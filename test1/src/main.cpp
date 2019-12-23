@@ -141,11 +141,12 @@ VkDescriptorSet g_descriptorSet;
 
 void DebugPrint(const char* fmt, ...)
 {
-    char buffer[512] = {};
     va_list args;
     va_start(args, fmt);
-    vsnprintf_s(buffer, std::size(buffer), _TRUNCATE, fmt, args);
-    OutputDebugStringA(buffer);
+    size_t len = _vscprintf(fmt, args);
+    std::vector<char> buff(len);
+    vsnprintf_s(buff.data(), len, _TRUNCATE, fmt, args);
+    OutputDebugStringA(buff.data());
     va_end(args);
 }
 
