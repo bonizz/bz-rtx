@@ -16,6 +16,58 @@ void DebugPrint(const char* fmt, ...);
     } \
 } while (false)
 
+struct ImageVulkan
+{
+    VkFormat format;
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView imageView;
+    VkSampler sampler;
+};
+
+struct BufferVulkan
+{
+    VkDeviceSize size;
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+};
+
+struct RTAccelerationStructure
+{
+    VkDeviceMemory memory;
+    VkAccelerationStructureInfoNV accelerationStructureInfo;
+    VkAccelerationStructureNV accelerationStructure;
+    uint64_t handle;
+};
+
+struct Mesh
+{
+    uint32_t numVertices;
+    uint32_t numFaces;
+
+    BufferVulkan positions;
+    BufferVulkan indices;
+
+    RTAccelerationStructure blas;
+};
+
+struct Scene
+{
+    // BONI TODO: move meshes here
+
+    RTAccelerationStructure tlas;
+};
+
+struct VkGeometryInstance
+{
+    float transform[12];
+    uint32_t instanceId : 24;
+    uint32_t mask : 8;
+    uint32_t instanceOffset : 24;
+    uint32_t flags : 8;
+    uint64_t accelerationStructureHandle;
+};
+
 const char* kAppName = "test vulkan app";
 bool kEnableValidation = true;
 
@@ -42,16 +94,12 @@ VkSemaphore g_semaphoreAcquired;
 VkSemaphore g_semaphoreRenderFinished;
 VkDebugReportCallbackEXT g_debugCallback;
 
+Mesh g_mesh;
+BufferVulkan g_instancesBuffer;
+Scene g_scene;
 
 
-struct ImageVulkan
-{
-    VkFormat format;
-    VkImage image;
-    VkDeviceMemory memory;
-    VkImageView imageView;
-    VkSampler sampler;
-};
+
 
 ImageVulkan g_offscreenImage;
 
@@ -129,7 +177,7 @@ uint32_t getMemoryType(VkMemoryRequirements& memoryRequirements, VkMemoryPropert
     return result;
 }
 
-bool init()
+bool initVulkan()
 {
     if (!glfwInit())
         return false;
@@ -367,12 +415,7 @@ bool init()
 
     {
         VkExtent3D imageExtent = { kWindowWidth, kWindowHeight, 1 };
-    //VkResult error = mOffscreenImage.Create(VK_IMAGE_TYPE_2D,
-    //                                        mSurfaceFormat.format,
-    //                                        extent,
-    //                                        VK_IMAGE_TILING_OPTIMAL,
-    //                                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-    //                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
         auto& img = g_offscreenImage;
         img = {};
 
@@ -409,8 +452,6 @@ bool init()
 
         VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-//    error = mOffscreenImage.CreateImageView(VK_IMAGE_VIEW_TYPE_2D, mSurfaceFormat.format, range);
-//
         VkImageViewCreateInfo imageViewCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
         imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         imageViewCreateInfo.format = img.format;
@@ -446,18 +487,346 @@ bool init()
         VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreRenderFinished));
     }
 
-
-
     return true;
+}
+
+void createScene()
+{
+    float positions[][3] = {
+        {1.f, 1.f, 0.f},
+        {-1.f, 1.f, 0.f},
+        {0.f, -1.f, 0.f}
+    };
+    float indices[] = { 0, 1, 2 };
+
+    {
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sizeof(positions);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        auto& buff = g_mesh.positions;
+
+        buff.size = sizeof(positions);
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+
+        void* mem = nullptr;
+        VkDeviceSize size = buff.size;
+        int offset = 0;
+        VK_CHECK(vkMapMemory(g_device, buff.memory, offset, size, 0, &mem));
+
+        memcpy(mem, positions, size);
+
+        vkUnmapMemory(g_device, buff.memory);
+    }
+
+    {
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sizeof(indices);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        auto& buff = g_mesh.indices;
+
+        buff.size = sizeof(indices);
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+
+        void* mem = nullptr;
+        VkDeviceSize size = buff.size;
+        int offset = 0;
+        VK_CHECK(vkMapMemory(g_device, buff.memory, offset, size, 0, &mem));
+
+        memcpy(mem, indices, size);
+
+        vkUnmapMemory(g_device, buff.memory);
+    }
+
+    VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
+    geometry.geometry.triangles = { VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV };
+    geometry.geometry.triangles.vertexData = g_mesh.positions.buffer;
+    geometry.geometry.triangles.vertexOffset = 0;
+    geometry.geometry.triangles.vertexCount = g_mesh.numVertices;
+    geometry.geometry.triangles.vertexStride = sizeof(float) * 3;
+    geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    geometry.geometry.triangles.indexData = g_mesh.indices.buffer;
+    geometry.geometry.triangles.indexOffset = 0;
+    geometry.geometry.triangles.indexCount = g_mesh.numFaces * 3;
+    geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32; // BONI TODO: switch to uint16
+    geometry.geometry.triangles.transformData = VK_NULL_HANDLE;
+    geometry.geometry.triangles.transformOffset = 0;
+    geometry.geometry.aabbs = { VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV };
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_NV;
+
+    const float transform[12] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+    };
+
+    {
+        VkAccelerationStructureInfoNV& accelerationStructureInfo = g_mesh.blas.accelerationStructureInfo;
+        accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
+        accelerationStructureInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
+        accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
+        accelerationStructureInfo.geometryCount = 1;
+        accelerationStructureInfo.instanceCount = 0;
+        accelerationStructureInfo.pGeometries = &geometry;
+
+        VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
+        accelerationStructureCreateInfo.info = accelerationStructureInfo;
+
+        VK_CHECK(vkCreateAccelerationStructureNV(g_device, &accelerationStructureCreateInfo, nullptr, &g_mesh.blas.accelerationStructure));
+
+        VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
+        memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+        memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+        memoryRequirementsInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
+
+        VkMemoryRequirements2 memoryRequirements;
+        vkGetAccelerationStructureMemoryRequirementsNV(g_device, &memoryRequirementsInfo, &memoryRequirements);
+
+        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements.memoryRequirements,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memoryAllocateInfo, nullptr, &g_mesh.blas.memory));
+
+        VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
+        bindInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
+        bindInfo.memory = g_mesh.blas.memory;
+        bindInfo.memoryOffset = 0;
+
+        vkBindAccelerationStructureMemoryNV(g_device, 1, &bindInfo);
+
+        VK_CHECK(vkGetAccelerationStructureHandleNV(g_device, g_mesh.blas.accelerationStructure, sizeof(uint64_t), &g_mesh.blas.handle));
+    }
+
+    VkGeometryInstance instance;
+    memcpy(instance.transform, transform, sizeof(transform));
+    instance.instanceId = 0;
+    instance.mask = 0xFF;
+    instance.instanceOffset = 0;
+    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
+    instance.accelerationStructureHandle = g_mesh.blas.handle;
+
+    
+    {
+        auto& buff = g_instancesBuffer;
+
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sizeof(VkGeometryInstance);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        buff.size = sizeof(VkGeometryInstance);
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+
+        void* mem = nullptr;
+        VkDeviceSize size = buff.size;
+        int offset = 0;
+        VK_CHECK(vkMapMemory(g_device, buff.memory, offset, size, 0, &mem));
+
+        memcpy(mem, &instance, size);
+
+        vkUnmapMemory(g_device, buff.memory);
+    }
+
+    {
+        RTAccelerationStructure& as = g_scene.tlas;
+
+        VkAccelerationStructureInfoNV& accelerationStructureInfo = as.accelerationStructureInfo;
+        accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
+        accelerationStructureInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
+        accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
+        accelerationStructureInfo.geometryCount = 0;
+        accelerationStructureInfo.instanceCount = 1;
+        accelerationStructureInfo.pGeometries = nullptr;
+
+        VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
+        accelerationStructureCreateInfo.info = accelerationStructureInfo;
+
+        VK_CHECK(vkCreateAccelerationStructureNV(g_device, &accelerationStructureCreateInfo, nullptr, &as.accelerationStructure));
+
+        VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
+        memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+        memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+        memoryRequirementsInfo.accelerationStructure = as.accelerationStructure;
+
+        VkMemoryRequirements2 memoryRequirements;
+        vkGetAccelerationStructureMemoryRequirementsNV(g_device, &memoryRequirementsInfo, &memoryRequirements);
+
+        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements.memoryRequirements,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memoryAllocateInfo, nullptr, &as.memory));
+
+        VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
+        bindInfo.accelerationStructure = as.accelerationStructure;
+        bindInfo.memory = as.memory;
+        bindInfo.memoryOffset = 0;
+
+        vkBindAccelerationStructureMemoryNV(g_device, 1, &bindInfo);
+
+        VK_CHECK(vkGetAccelerationStructureHandleNV(g_device, g_mesh.blas.accelerationStructure, sizeof(uint64_t), &as.handle));
+    }
+
+    // Build bottom/top AS
+    
+    VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
+    memoryRequirementsInfo.sType = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV };
+    memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
+
+    VkDeviceSize maxBlasSize = 0;
+    memoryRequirementsInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
+
+    VkMemoryRequirements2 memReqBlas;
+    vkGetAccelerationStructureMemoryRequirementsNV(g_device, &memoryRequirementsInfo, &memReqBlas);
+
+    maxBlasSize = memReqBlas.memoryRequirements.size;
+
+    VkMemoryRequirements2 memReqTlas;
+    memoryRequirementsInfo.accelerationStructure = g_scene.tlas.accelerationStructure;
+    vkGetAccelerationStructureMemoryRequirementsNV(g_device, &memoryRequirementsInfo, &memReqTlas);
+
+    VkDeviceSize scratchBufferSize = std::max(maxBlasSize, memReqTlas.memoryRequirements.size);
+
+    BufferVulkan scratchBuffer;
+    {
+        auto& buff = scratchBuffer;
+
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sizeof(VkGeometryInstance);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        buff.size = sizeof(VkGeometryInstance);
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+    }
+
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    commandBufferAllocateInfo.commandPool = g_commandPool;
+    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    commandBufferAllocateInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateCommandBuffers(g_device, &commandBufferAllocateInfo, &cmdBuffer));
+
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
+    memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
+
+    g_mesh.blas.accelerationStructureInfo.instanceCount = 0;
+    g_mesh.blas.accelerationStructureInfo.geometryCount = 1;
+    g_mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
+    vkCmdBuildAccelerationStructureNV(cmdBuffer, &g_mesh.blas.accelerationStructureInfo,
+            VK_NULL_HANDLE, 0, VK_FALSE, g_mesh.blas.accelerationStructure,
+            VK_NULL_HANDLE, scratchBuffer.buffer, 0);
+
+    vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            0, 1, &memoryBarrier, 0, 0, 0, 0);
+
+    g_scene.tlas.accelerationStructureInfo.instanceCount = 1;
+    g_scene.tlas.accelerationStructureInfo.geometryCount = 0;
+    g_scene.tlas.accelerationStructureInfo.pGeometries = nullptr;
+    vkCmdBuildAccelerationStructureNV(cmdBuffer, &g_scene.tlas.accelerationStructureInfo,
+            g_instancesBuffer.buffer, 0, VK_FALSE, g_scene.tlas.accelerationStructure,
+            VK_NULL_HANDLE, scratchBuffer.buffer, 0);
+
+    vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            0, 1, &memoryBarrier, 0, 0, 0, 0);
+
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+
+    vkQueueSubmit(g_queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(g_queue);
+    vkFreeCommandBuffers(g_device, g_commandPool, 1, &cmdBuffer);
 }
 
 int main()
 {
-    if (!init())
+    if (!initVulkan())
     {
         fprintf(stderr, "Error: unable to initialize Vulkan\n");
         return 1;
     }
+
+    createScene();
+
+
 
 
 
