@@ -1185,6 +1185,7 @@ int main()
 
     setupCamera();
 
+    createDescriptorSetLayouts();
     createRaytracingPipeline();
     createShaderBindingTable();
     createDescriptorSets();
