@@ -570,7 +570,7 @@ void createScene()
         {-1.f, 1.f, 0.f},
         {0.f, -1.f, 0.f}
     };
-    float indices[] = { 0, 1, 2 };
+    uint32_t indices[] = { 0, 1, 2 };
 
     {
         VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -641,6 +641,9 @@ void createScene()
 
         vkUnmapMemory(g_device, buff.memory);
     }
+
+    g_mesh.numVertices = 3;
+    g_mesh.numFaces = 1;
 
     VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
@@ -815,11 +818,11 @@ void createScene()
 
         VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sizeof(VkGeometryInstance);
+        bufferCreateInfo.size = scratchBufferSize;
         bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
         bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        buff.size = sizeof(VkGeometryInstance);
+        buff.size = scratchBufferSize;
 
         VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
 
@@ -860,8 +863,8 @@ void createScene()
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
     vkCmdPipelineBarrier(cmdBuffer,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             0, 1, &memoryBarrier, 0, 0, 0, 0);
 
     g_scene.tlas.accelerationStructureInfo.instanceCount = 1;
@@ -872,8 +875,8 @@ void createScene()
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
     vkCmdPipelineBarrier(cmdBuffer,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             0, 1, &memoryBarrier, 0, 0, 0, 0);
 
     vkEndCommandBuffer(cmdBuffer);
@@ -884,9 +887,16 @@ void createScene()
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmdBuffer;
 
-    vkQueueSubmit(g_queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(g_queue);
+    VK_CHECK(vkQueueSubmit(g_queue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(g_queue));
+
     vkFreeCommandBuffers(g_device, g_commandPool, 1, &cmdBuffer);
+
+    {
+        vkDestroyBuffer(g_device, scratchBuffer.buffer, nullptr);
+        vkFreeMemory(g_device, scratchBuffer.memory, nullptr);
+        scratchBuffer = {};
+    }
 }
 
 void setupCamera()
