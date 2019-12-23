@@ -93,15 +93,51 @@ std::vector<VkCommandBuffer> g_commandBuffers;
 VkSemaphore g_semaphoreAcquired;
 VkSemaphore g_semaphoreRenderFinished;
 VkDebugReportCallbackEXT g_debugCallback;
+VkShaderModule g_raygenShader;
+VkShaderModule g_chitShader;
+VkShaderModule g_missShader;
+
+ImageVulkan g_offscreenImage;
 
 Mesh g_mesh;
 BufferVulkan g_instancesBuffer;
 Scene g_scene;
 
+struct CameraUniformData
+{
+    glm::mat4 viewInverse;
+    glm::mat4 projInverse;
+};
+
+struct CameraData
+{
+    glm::mat4 view;
+    glm::mat4 perspective;
+
+    CameraUniformData cameraUniformData;
+    BufferVulkan buffer;
+};
+
+CameraData g_camera;
+
+VkDescriptorSetLayout g_descriptorSetLayout;
+VkPipelineLayout g_pipelineLayout;
+VkPipeline g_rtPipeline;
+
+BufferVulkan g_sbtBuffer;
+
+VkDescriptorPool g_descriptorPool;
+VkDescriptorSet g_descriptorSet;
 
 
 
-ImageVulkan g_offscreenImage;
+
+
+
+
+
+
+
 
 void DebugPrint(const char* fmt, ...)
 {
@@ -176,6 +212,42 @@ uint32_t getMemoryType(VkMemoryRequirements& memoryRequirements, VkMemoryPropert
 
     return result;
 }
+
+bool loadShader(const char* filename, VkShaderModule* pShaderModule)
+{
+    bool result = false;
+
+    std::ifstream file(filename, std::ios::in | std::ios::binary);
+    if (file)
+    {
+        file.seekg(0, std::ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> bytecode(fileSize);
+        bytecode.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+        VkShaderModuleCreateInfo ci = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        ci.codeSize = fileSize;
+        ci.pCode = (uint32_t*)(bytecode.data());
+        ci.flags = 0;
+
+        VkResult error = vkCreateShaderModule(g_device, &ci, nullptr, pShaderModule);
+        VK_CHECK(error);
+
+        result = error == VK_SUCCESS;
+    }
+
+    if (!result)
+    {
+        DebugPrint("Error loading: %s\n", filename);
+        BASSERT(0);
+    }
+
+    return result;
+}
+
+// ------------
 
 bool initVulkan()
 {
@@ -816,6 +888,280 @@ void createScene()
     vkFreeCommandBuffers(g_device, g_commandPool, 1, &cmdBuffer);
 }
 
+void setupCamera()
+{
+    {
+        auto& buff = g_camera.buffer;
+
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sizeof(CameraUniformData);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        buff.size = sizeof(CameraUniformData);
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+
+        /*
+        void* mem = nullptr;
+        VkDeviceSize size = buff.size;
+        int offset = 0;
+        VK_CHECK(vkMapMemory(g_device, buff.memory, offset, size, 0, &mem));
+
+        memcpy(mem, &instance, size);
+
+        vkUnmapMemory(g_device, buff.memory);
+        */
+    }
+
+    g_camera.perspective = glm::perspective(glm::radians(60.f),
+            float(kWindowWidth) / kWindowHeight, 0.1f, 512.f);
+    g_camera.view = glm::translate(glm::mat4(1.f), glm::vec3(0, 0, -2.5f));
+}
+
+void createDescriptorSetLayouts()
+{
+    // Set 0:
+    //   Binding 0 -> AS
+    //   Binding 1 -> output image
+    //   Binding 2 -> camera data
+
+    VkDescriptorSetLayoutBinding asLayoutBinding = {};
+    asLayoutBinding.binding = 0;
+    asLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
+    asLayoutBinding.descriptorCount = 1;
+    asLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+
+    VkDescriptorSetLayoutBinding outputImageLayoutBinding = {};
+    outputImageLayoutBinding.binding = 1;
+    outputImageLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    outputImageLayoutBinding.descriptorCount = 1;
+    outputImageLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+
+    VkDescriptorSetLayoutBinding cameraDataLayoutBinding = {};
+    cameraDataLayoutBinding.binding = 2;
+    cameraDataLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cameraDataLayoutBinding.descriptorCount = 1;
+    cameraDataLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+
+    VkDescriptorSetLayoutBinding bindings[] = {
+        asLayoutBinding,
+        outputImageLayoutBinding,
+        cameraDataLayoutBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo set0LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    set0LayoutInfo.flags = 0;
+    set0LayoutInfo.bindingCount = (uint32_t)std::size(bindings);
+    set0LayoutInfo.pBindings = bindings;
+
+    VK_CHECK(vkCreateDescriptorSetLayout(g_device, &set0LayoutInfo, nullptr, &g_descriptorSetLayout));
+}
+
+void createRaytracingPipeline()
+{
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pipelineLayoutCreateInfo.flags = 0;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &g_descriptorSetLayout;
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+
+    VK_CHECK(vkCreatePipelineLayout(g_device, &pipelineLayoutCreateInfo, nullptr, &g_pipelineLayout));
+
+    loadShader("shaders/raygen.rgen.spv", &g_raygenShader);
+    loadShader("shaders/chit.rchit.spv", &g_chitShader);
+    loadShader("shaders/miss.rmiss.spv", &g_missShader);
+
+    VkPipelineShaderStageCreateInfo raygenStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    raygenStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+    raygenStage.module = g_raygenShader;
+    raygenStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo chitStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    chitStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+    chitStage.module = g_chitShader;
+    chitStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo missStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    missStage.stage = VK_SHADER_STAGE_MISS_BIT_NV;
+    missStage.module = g_missShader;
+    missStage.pName = "main";
+
+    VkRayTracingShaderGroupCreateInfoNV raygenGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
+    raygenGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+    raygenGroup.generalShader = 0;
+    raygenGroup.closestHitShader = VK_SHADER_UNUSED_NV;
+    raygenGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    raygenGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+
+    VkRayTracingShaderGroupCreateInfoNV chitGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
+    chitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_NV;
+    raygenGroup.generalShader = VK_SHADER_UNUSED_NV;
+    raygenGroup.closestHitShader = 1;
+    raygenGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    raygenGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+
+    VkRayTracingShaderGroupCreateInfoNV missGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
+    missGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+    missGroup.generalShader = 2;
+    missGroup.closestHitShader = VK_SHADER_UNUSED_NV;
+    missGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    missGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+
+    VkPipelineShaderStageCreateInfo stages[] = {
+        raygenStage,
+        chitStage,
+        missStage
+    };
+
+    VkRayTracingShaderGroupCreateInfoNV groups[] = {
+        raygenGroup,
+        chitGroup,
+        missGroup
+    };
+
+    VkRayTracingPipelineCreateInfoNV rayPipelineInfo = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_NV };
+    rayPipelineInfo.stageCount = (uint32_t)std::size(stages);
+    rayPipelineInfo.pStages = stages;
+    rayPipelineInfo.groupCount = (uint32_t)std::size(groups);
+    rayPipelineInfo.pGroups = groups;
+    rayPipelineInfo.maxRecursionDepth = 1;
+    rayPipelineInfo.layout = g_pipelineLayout;
+
+    VK_CHECK(vkCreateRayTracingPipelinesNV(g_device, VK_NULL_HANDLE, 1, &rayPipelineInfo, nullptr, &g_rtPipeline));
+}
+
+void createShaderBindingTable()
+{
+    {
+        auto& buff = g_sbtBuffer;
+
+        uint32_t sbtSize = g_rtProps.shaderGroupHandleSize * 3;
+
+        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferCreateInfo.flags = 0;
+        bufferCreateInfo.size = sbtSize;
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        buff.size = sbtSize;
+
+        VK_CHECK(vkCreateBuffer(g_device, &bufferCreateInfo, nullptr, &buff.buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(g_device, buff.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memAllocInfo.allocationSize = memoryRequirements.size;
+        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+        VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
+
+        VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
+    }
+
+    void* sbtBufferMemory = nullptr;
+    VK_CHECK(vkMapMemory(g_device, g_sbtBuffer.memory, 0, g_sbtBuffer.size, 0, &sbtBufferMemory));
+
+    // We only need the handles
+    int numGroups = 3; // raygen, 1 hit, 1 miss
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(g_device, g_rtPipeline, 0,
+                numGroups, g_sbtBuffer.size, sbtBufferMemory));
+
+    vkUnmapMemory(g_device, g_sbtBuffer.memory);
+}
+
+void createDescriptorSets()
+{
+    VkDescriptorPoolSize poolSizes[] = {
+        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+    };
+
+    VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    descPoolCreateInfo.poolSizeCount = (uint32_t)std::size(poolSizes);
+    descPoolCreateInfo.pPoolSizes = poolSizes;
+    descPoolCreateInfo.maxSets = 1;
+
+    VK_CHECK(vkCreateDescriptorPool(g_device, &descPoolCreateInfo, nullptr, &g_descriptorPool));
+
+    VkDescriptorSetLayout setLayouts[] = {
+        g_descriptorSetLayout
+    };
+
+    VkDescriptorSetAllocateInfo descSetAllocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    descSetAllocInfo.descriptorPool = g_descriptorPool;
+    descSetAllocInfo.pSetLayouts = setLayouts;
+    descSetAllocInfo.descriptorSetCount = 1;
+
+    VK_CHECK(vkAllocateDescriptorSets(g_device, &descSetAllocInfo, &g_descriptorSet));
+
+    VkWriteDescriptorSetAccelerationStructureNV descAccelStructInfo = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV };
+    descAccelStructInfo.accelerationStructureCount = 1;
+    descAccelStructInfo.pAccelerationStructures = &g_scene.tlas.accelerationStructure;
+
+    VkWriteDescriptorSet accelStructWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    accelStructWrite.pNext = &descAccelStructInfo;
+    accelStructWrite.dstSet = g_descriptorSet;
+    accelStructWrite.dstBinding = 0;
+    accelStructWrite.descriptorCount = 1;
+    accelStructWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
+    accelStructWrite.pImageInfo = nullptr;
+    accelStructWrite.pBufferInfo = nullptr;
+    accelStructWrite.pTexelBufferView = nullptr;
+
+    VkDescriptorImageInfo descOutputImageInfo = {};
+    descOutputImageInfo.imageView = g_offscreenImage.imageView;
+    descOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet resImageWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    resImageWrite.dstSet = g_descriptorSet;
+    resImageWrite.dstBinding = 1;
+    resImageWrite.descriptorCount = 1;
+    resImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    resImageWrite.pImageInfo = &descOutputImageInfo;
+    resImageWrite.pBufferInfo = nullptr;
+    resImageWrite.pTexelBufferView = nullptr;
+
+    VkDescriptorBufferInfo camdataBufferInfo = {};
+    camdataBufferInfo.buffer = g_camera.buffer.buffer;
+    camdataBufferInfo.offset = 0;
+    camdataBufferInfo.range = g_camera.buffer.size;
+
+    VkWriteDescriptorSet camdataBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    camdataBufferWrite.dstSet = g_descriptorSet;
+    camdataBufferWrite.dstBinding = 2;
+    camdataBufferWrite.descriptorCount = 1;
+    camdataBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    camdataBufferWrite.pImageInfo = nullptr;
+    camdataBufferWrite.pBufferInfo = &camdataBufferInfo;
+    camdataBufferWrite.pTexelBufferView = nullptr;
+
+    VkWriteDescriptorSet descriptorWrites[] = {
+        accelStructWrite,
+        resImageWrite,
+        camdataBufferWrite
+    };
+
+    vkUpdateDescriptorSets(g_device, (uint32_t)std::size(descriptorWrites), descriptorWrites, 0, VK_NULL_HANDLE);
+}
+
 int main()
 {
     if (!initVulkan())
@@ -826,7 +1172,13 @@ int main()
 
     createScene();
 
+    setupCamera();
 
+    createRaytracingPipeline();
+    createShaderBindingTable();
+    createDescriptorSets();
+
+    
 
 
 
