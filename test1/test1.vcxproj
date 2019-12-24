@@ -71,8 +71,12 @@
       <AdditionalLibraryDirectories>external\glfw\lib-vc2019;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <CustomBuildStep>
-      <Command>cd $(ProjectDir)\shaders &amp;&amp; call build-shaders.bat</Command>
+      <Command>
+      </Command>
     </CustomBuildStep>
+    <PreBuildEvent>
+      <Command>cd $(ProjectDir)\shaders &amp;&amp; call build-shaders.bat</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Win64|x64'">
     <ClCompile>

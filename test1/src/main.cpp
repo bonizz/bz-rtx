@@ -90,7 +90,7 @@ std::vector<VkFence> g_waitForFrameFences;
 VkCommandPool g_commandPool;
 VkPhysicalDeviceMemoryProperties g_physicalDeviceMemoryProperties;
 std::vector<VkCommandBuffer> g_commandBuffers;
-VkSemaphore g_semaphoreAcquired;
+VkSemaphore g_semaphoreImageAcquired;
 VkSemaphore g_semaphoreRenderFinished;
 VkDebugReportCallbackEXT g_debugCallback;
 VkShaderModule g_raygenShader;
@@ -114,7 +114,6 @@ struct CameraData
     glm::mat4 view;
     glm::mat4 perspective;
 
-    CameraUniformData cameraUniformData;
     BufferVulkan buffer;
 };
 
@@ -556,7 +555,7 @@ bool initVulkan()
         VkSemaphoreCreateInfo info = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         info.flags = 0;
 
-        VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreAcquired));
+        VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreImageAcquired));
         VK_CHECK(vkCreateSemaphore(g_device, &info, nullptr, &g_semaphoreRenderFinished));
     }
 
@@ -926,17 +925,6 @@ void setupCamera()
         VK_CHECK(vkAllocateMemory(g_device, &memAllocInfo, nullptr, &buff.memory));
 
         VK_CHECK(vkBindBufferMemory(g_device, buff.buffer, buff.memory, 0));
-
-        /*
-        void* mem = nullptr;
-        VkDeviceSize size = buff.size;
-        int offset = 0;
-        VK_CHECK(vkMapMemory(g_device, buff.memory, offset, size, 0, &mem));
-
-        memcpy(mem, &instance, size);
-
-        vkUnmapMemory(g_device, buff.memory);
-        */
     }
 
     g_camera.perspective = glm::perspective(glm::radians(60.f),
@@ -1173,6 +1161,125 @@ void createDescriptorSets()
     vkUpdateDescriptorSets(g_device, (uint32_t)std::size(descriptorWrites), descriptorWrites, 0, VK_NULL_HANDLE);
 }
 
+void fillCommandBuffers()
+{
+    VkCommandBufferBeginInfo commandBufferBeginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    commandBufferBeginInfo.flags = 0;
+
+    VkImageSubresourceRange subresourceRange = {};
+    subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subresourceRange.baseMipLevel = 0;
+    subresourceRange.levelCount = 1;
+    subresourceRange.baseArrayLayer = 0;
+    subresourceRange.layerCount = 1;
+
+    for (size_t i = 0; i < g_commandBuffers.size(); i++)
+    {
+        const VkCommandBuffer cmdBuffer = g_commandBuffers[i];
+
+        VK_CHECK(vkBeginCommandBuffer(cmdBuffer, &commandBufferBeginInfo));
+
+        VkImageMemoryBarrier imageMemoryBarrier1 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        imageMemoryBarrier1.srcAccessMask = 0; // ?
+        imageMemoryBarrier1.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        imageMemoryBarrier1.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageMemoryBarrier1.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageMemoryBarrier1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier1.image = g_offscreenImage.image;
+        imageMemoryBarrier1.subresourceRange = subresourceRange;
+
+        vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier1);
+
+        {
+            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_NV, g_rtPipeline);
+
+            vkCmdBindDescriptorSets(cmdBuffer,
+                VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+                g_pipelineLayout, 0,
+                1, &g_descriptorSet,
+                0, 0);
+
+            uint32_t stride = g_rtProps.shaderGroupHandleSize;
+
+            vkCmdTraceRaysNV(cmdBuffer,
+                // raygen
+                g_sbtBuffer.buffer, 0,
+                // miss
+                g_sbtBuffer.buffer, stride * 2, stride,
+                // hit
+                g_sbtBuffer.buffer, stride * 1, stride,
+                // callable
+                VK_NULL_HANDLE, 0, 0,
+                kWindowWidth, kWindowHeight, 1);
+        }
+
+        // prepare swapchain as transfer dst
+
+        VkImageMemoryBarrier imageMemoryBarrier2 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        imageMemoryBarrier2.srcAccessMask = 0;
+        imageMemoryBarrier2.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        imageMemoryBarrier2.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageMemoryBarrier2.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        imageMemoryBarrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier2.image = g_swapchainImages[i];
+        imageMemoryBarrier2.subresourceRange = subresourceRange;
+
+        vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier2);
+
+        // prepare offscreen image as transfer src
+
+        VkImageMemoryBarrier imageMemoryBarrier3 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        imageMemoryBarrier3.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        imageMemoryBarrier3.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        imageMemoryBarrier3.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageMemoryBarrier3.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        imageMemoryBarrier3.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier3.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier3.image = g_offscreenImage.image;
+        imageMemoryBarrier3.subresourceRange = subresourceRange;
+
+        vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier3);
+
+        VkImageCopy copyRegion = {};
+        copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.srcOffset = { 0, 0, 0 };
+        copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.dstOffset = { 0, 0, 0 };
+        copyRegion.extent = { kWindowWidth, kWindowHeight, 1 };
+
+        vkCmdCopyImage(cmdBuffer,
+            g_offscreenImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            g_swapchainImages[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &copyRegion);
+
+        VkImageMemoryBarrier imageMemoryBarrier4 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        imageMemoryBarrier4.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        imageMemoryBarrier4.dstAccessMask = 0;
+        imageMemoryBarrier4.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        imageMemoryBarrier4.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        imageMemoryBarrier4.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier4.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier4.image = g_swapchainImages[i];
+        imageMemoryBarrier4.subresourceRange = subresourceRange;
+
+        vkCmdPipelineBarrier(cmdBuffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier4);
+
+        VK_CHECK(vkEndCommandBuffer(cmdBuffer));
+    }
+
+}
+
+
 int main()
 {
     if (!initVulkan())
@@ -1190,22 +1297,54 @@ int main()
     createShaderBindingTable();
     createDescriptorSets();
 
-    
+    // BONI TODO: do this every frame
+    fillCommandBuffers();
 
+    while (!glfwWindowShouldClose(g_window))
+    {
+        uint32_t imageIndex = 0;
+        VK_CHECK(vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_semaphoreImageAcquired, nullptr, &imageIndex));
 
+        const VkFence fence = g_waitForFrameFences[imageIndex];
+        VK_CHECK(vkWaitForFences(g_device, 1, &fence, VK_TRUE, UINT64_MAX));
+        vkResetFences(g_device, 1, &fence);
 
+        // Update camera
+        {
+            CameraUniformData camData;
+            camData.viewInverse = glm::inverse(g_camera.view);
+            camData.projInverse = glm::inverse(g_camera.perspective);
 
+            void* mem = nullptr;
+            VK_CHECK(vkMapMemory(g_device, g_camera.buffer.memory, 0, g_camera.buffer.size, 0, &mem));
 
-    uint32_t extensionCount = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+            memcpy(mem, &camData, sizeof(CameraUniformData));
 
-    printf("%d extensions supported\n", extensionCount);
+            vkUnmapMemory(g_device, g_camera.buffer.memory);
+        }
 
-    glm::mat4 matrix;
-    glm::vec4 vec;
-    auto test = matrix * vec;
+        const VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    while (!glfwWindowShouldClose(g_window)) {
+        VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &g_semaphoreImageAcquired;
+        submitInfo.pWaitDstStageMask = &waitStageMask;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &g_commandBuffers[imageIndex];
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &g_semaphoreRenderFinished;
+
+        VK_CHECK(vkQueueSubmit(g_queue, 1, &submitInfo, fence));
+
+        VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &g_semaphoreRenderFinished;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &g_swapchain;
+        presentInfo.pImageIndices = &imageIndex;
+
+        VK_CHECK(vkQueuePresentKHR(g_queue, &presentInfo));
+
         glfwPollEvents();
     }
 
