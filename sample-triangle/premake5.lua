@@ -11,7 +11,7 @@ project "sample-triangle"
     pchsource "src/pch.cpp"
 
     libdirs {
-        "external/glfw/lib-vc2019"
+        "../external/glfw/lib-vc2019"
     }
     links {
         "glfw3"
@@ -23,24 +23,24 @@ project "sample-triangle"
     }
 
     includedirs {
-        "external/glfw/include",
-        "external/glm",
-        "external/volk",
+        "../external/glfw/include",
+        "../external/glm",
+        "../external/volk",
         "$(VULKAN_SDK)/Include",
         "src"
     }
 
     files {
-        "external/glfw/include/**.h",
-        "external/glm/glm/**.hpp",
-        "external/volk/volk.h",
-        "external/volk/volk.c",
+        "../external/glfw/include/**.h",
+        "../external/glm/glm/**.hpp",
+        "../external/volk/volk.h",
+        "../external/volk/volk.c",
         "src/**.h",
         "src/**.cpp"
     }
 
     filter {
-        "files:external/volk/volk.c"
+        "files:../external/volk/volk.c"
     }
     flags { "NoPCH" }
 
