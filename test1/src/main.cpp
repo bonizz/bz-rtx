@@ -450,32 +450,10 @@ void createScene()
 
 void setupCamera()
 {
-    {
-        auto& buff = g_camera.buffer;
-
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sizeof(CameraUniformData);
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        buff.size = sizeof(CameraUniformData);
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-    }
+    createBufferVulkan(vk, { sizeof(CameraUniformData),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT },
+        &g_camera.buffer);
 
     g_camera.perspective = glm::perspective(glm::radians(60.f),
             float(kWindowWidth) / kWindowHeight, 0.1f, 512.f);
