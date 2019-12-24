@@ -50,7 +50,6 @@ uint32_t kWindowHeight = 600;
 GLFWwindow* g_window;
 
 
-
 VkShaderModule g_raygenShader;
 VkShaderModule g_chitShader;
 VkShaderModule g_missShader;
@@ -59,16 +58,14 @@ ImageVulkan g_offscreenImage;
 
 BufferVulkan g_instancesBuffer;
 
-VkDescriptorSetLayout g_descriptorSetLayout;
+BufferVulkan g_sbtBuffer;
+
 VkPipelineLayout g_pipelineLayout;
 VkPipeline g_rtPipeline;
 
-BufferVulkan g_sbtBuffer;
-
+VkDescriptorSetLayout g_descriptorSetLayout;
 VkDescriptorPool g_descriptorPool;
 VkDescriptorSet g_descriptorSet;
-
-
 
 
 struct CameraUniformData
@@ -132,7 +129,7 @@ bool loadShader(const char* filename, VkShaderModule* pShaderModule)
 
 
 
-bool initVulkan()
+bool initApp()
 {
     if (!glfwInit())
         return false;
@@ -158,6 +155,47 @@ bool initVulkan()
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &g_offscreenImage);
 
     return true;
+}
+
+void shutdownApp()
+{
+    vkDeviceWaitIdle(vk.device);
+
+    destroyBufferVulkan(vk, g_camera.buffer);
+
+    {
+        destroyBufferVulkan(vk, g_mesh.positions);
+        destroyBufferVulkan(vk, g_mesh.indices);
+
+        vkDestroyAccelerationStructureNV(vk.device, g_mesh.blas.accelerationStructure, nullptr);
+        vkFreeMemory(vk.device, g_mesh.blas.memory, nullptr);
+    }
+
+    {
+        vkDestroyAccelerationStructureNV(vk.device, g_scene.tlas.accelerationStructure, nullptr);
+        vkFreeMemory(vk.device, g_scene.tlas.memory, nullptr);
+    }
+
+    vkDestroyShaderModule(vk.device, g_raygenShader, nullptr);
+    vkDestroyShaderModule(vk.device, g_chitShader, nullptr);
+    vkDestroyShaderModule(vk.device, g_missShader, nullptr);
+
+    vkDestroyDescriptorPool(vk.device, g_descriptorPool, nullptr);
+
+    destroyBufferVulkan(vk, g_sbtBuffer);
+
+    vkDestroyPipeline(vk.device, g_rtPipeline, nullptr);
+    vkDestroyPipelineLayout(vk.device, g_pipelineLayout, nullptr);
+
+    vkDestroyDescriptorSetLayout(vk.device, g_descriptorSetLayout, nullptr);
+
+    destroyBufferVulkan(vk, g_instancesBuffer);
+    destroyImageVulkan(vk, g_offscreenImage);
+
+    destroyDeviceVulkan(vk);
+
+    glfwDestroyWindow(g_window);
+    glfwTerminate();
 }
 
 void createScene()
@@ -721,7 +759,7 @@ void fillCommandBuffers()
 
 int main()
 {
-    if (!initVulkan())
+    if (!initApp())
     {
         fprintf(stderr, "Error: unable to initialize Vulkan\n");
         return 1;
@@ -787,10 +825,7 @@ int main()
         glfwPollEvents();
     }
 
-    vkDeviceWaitIdle(vk.device);
-
-    glfwDestroyWindow(g_window);
-    glfwTerminate();
+    shutdownApp();
 
     return 0;
 }

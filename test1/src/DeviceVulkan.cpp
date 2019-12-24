@@ -300,9 +300,34 @@ bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVu
     return true;
 }
 
-void destroyDeviceVulkan(DeviceVulkan& deviceVulkan)
+void destroyDeviceVulkan(DeviceVulkan& vk)
 {
-    // BONI TODO
+    vkDeviceWaitIdle(vk.device);
+
+    vkDestroySemaphore(vk.device, vk.semaphoreRenderFinished, nullptr);
+    vkDestroySemaphore(vk.device, vk.semaphoreImageAcquired, nullptr);
+
+    vkFreeCommandBuffers(vk.device, vk.commandPool, uint32_t(vk.commandBuffers.size()),
+        vk.commandBuffers.data());
+    vkDestroyCommandPool(vk.device, vk.commandPool, nullptr);
+
+    for (auto& fence : vk.waitForFrameFences)
+        vkDestroyFence(vk.device, fence, nullptr);
+
+    for (auto& view : vk.swapchainImageViews)
+        vkDestroyImageView(vk.device, view, nullptr);
+
+    vkDestroySwapchainKHR(vk.device, vk.swapchain, nullptr);
+
+    vkDestroySurfaceKHR(vk.instance, vk.surface, nullptr);
+
+    vkDestroyDevice(vk.device, nullptr);
+
+    vkDestroyDebugReportCallbackEXT(vk.instance, vk.debugCallback, nullptr);
+
+    vkDestroyInstance(vk.instance, nullptr);
+
+    vk = {};
 }
 
 bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* pBuffer)
