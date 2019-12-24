@@ -398,7 +398,7 @@ void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer)
 bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, ImageVulkan* pImage)
 {
     ImageVulkan& img = *pImage;
-    img.imageType = ci.imageType;
+    img.type = ci.imageType;
     img.format = ci.format;
     img.extent = ci.extent;
 
@@ -407,7 +407,7 @@ bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, 
 
     VkImageCreateInfo imageCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     imageCreateInfo.flags = 0;
-    imageCreateInfo.imageType = img.imageType;
+    imageCreateInfo.imageType = img.type;
     imageCreateInfo.format = img.format;
     imageCreateInfo.extent = img.extent;
     imageCreateInfo.mipLevels = 1;
@@ -463,14 +463,14 @@ bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, 
         VK_COMPONENT_SWIZZLE_A
     };
 
-    VK_CHECK(vkCreateImageView(vk.device, &imageViewCreateInfo, nullptr, &img.imageView));
+    VK_CHECK(vkCreateImageView(vk.device, &imageViewCreateInfo, nullptr, &img.view));
 
     return true;
 }
 
 void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image)
 {
-    vkDestroyImageView(vk.device, image.imageView, nullptr);
+    vkDestroyImageView(vk.device, image.view, nullptr);
     vkFreeMemory(vk.device, image.memory, nullptr);
     vkDestroyImage(vk.device, image.image, nullptr);
 }
@@ -507,5 +507,55 @@ bool createShaderVulkan(const DeviceVulkan& vk, const char* filename, VkShaderMo
     }
 
     return result;
+}
+
+bool createAccelerationStructureVulkan(const DeviceVulkan& vk, const AccelerationStructureVulkanCreateInfo& ci, AccelerationStructureVulkan* pAccelerationStructure)
+{
+    AccelerationStructureVulkan& as = *pAccelerationStructure;
+
+    VkAccelerationStructureInfoNV& accelerationStructureInfo = as.accelerationStructureInfo;
+    accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
+    accelerationStructureInfo.type = ci.type;
+    accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
+    accelerationStructureInfo.geometryCount = ci.geometryCount;
+    accelerationStructureInfo.instanceCount = ci.instanceCount;
+    accelerationStructureInfo.pGeometries = ci.pGeometries;
+
+    VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
+    accelerationStructureCreateInfo.info = accelerationStructureInfo;
+
+    VK_CHECK(vkCreateAccelerationStructureNV(vk.device, &accelerationStructureCreateInfo, nullptr, &as.accelerationStructure));
+
+    VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
+    memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+    memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+    memoryRequirementsInfo.accelerationStructure = as.accelerationStructure;
+
+    VkMemoryRequirements2 memoryRequirements;
+    vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memoryRequirements);
+
+    VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
+    memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &as.memory));
+
+    VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
+    bindInfo.accelerationStructure = as.accelerationStructure;
+    bindInfo.memory = as.memory;
+    bindInfo.memoryOffset = 0;
+
+    vkBindAccelerationStructureMemoryNV(vk.device, 1, &bindInfo);
+
+    VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, as.accelerationStructure, sizeof(uint64_t), &as.handle));
+
+    return true;
+}
+
+void destroyAccelerationStructure(const DeviceVulkan& vk, AccelerationStructureVulkan& as)
+{
+    vkDestroyAccelerationStructureNV(vk.device, as.accelerationStructure, nullptr);
+    vkFreeMemory(vk.device, as.memory, nullptr);
 }
 

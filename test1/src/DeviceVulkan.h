@@ -24,12 +24,12 @@ struct BufferVulkanCreateInfo
 
 struct ImageVulkan
 {
-    VkImageType imageType;
+    VkImageType type;
     VkFormat format;
     VkExtent3D extent;
     VkImage image;
     VkDeviceMemory memory;
-    VkImageView imageView;
+    VkImageView view;
 };
 
 struct ImageVulkanCreateInfo
@@ -39,6 +39,22 @@ struct ImageVulkanCreateInfo
     VkExtent3D extent;
     VkImageUsageFlags usage;
     VkMemoryPropertyFlags memoryProperties;
+};
+
+struct AccelerationStructureVulkan
+{
+    VkDeviceMemory memory;
+    VkAccelerationStructureInfoNV accelerationStructureInfo;
+    VkAccelerationStructureNV accelerationStructure;
+    uint64_t handle;
+};
+
+struct AccelerationStructureVulkanCreateInfo
+{
+    VkAccelerationStructureTypeNV type;
+    uint32_t geometryCount;
+    uint32_t instanceCount;
+    VkGeometryNV* pGeometries;
 };
 
 struct DeviceVulkan
@@ -90,4 +106,11 @@ bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, 
 void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image);
 
 bool createShaderVulkan(const DeviceVulkan& vk, const char* filename, VkShaderModule* pShaderModule);
+
+bool createAccelerationStructureVulkan(const DeviceVulkan& vk,
+    const AccelerationStructureVulkanCreateInfo& ci,
+    AccelerationStructureVulkan* pAccelerationStructure);
+
+void destroyAccelerationStructure(const DeviceVulkan& vk,
+    AccelerationStructureVulkan& as);
 

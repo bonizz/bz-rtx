@@ -6,15 +6,6 @@
 #include "DeviceVulkan.h"
 
 
-
-struct RTAccelerationStructure
-{
-    VkDeviceMemory memory;
-    VkAccelerationStructureInfoNV accelerationStructureInfo;
-    VkAccelerationStructureNV accelerationStructure;
-    uint64_t handle;
-};
-
 struct VkGeometryInstance
 {
     float transform[12];
@@ -33,7 +24,7 @@ struct Mesh
     BufferVulkan positions;
     BufferVulkan indices;
 
-    RTAccelerationStructure blas;
+    AccelerationStructureVulkan blas;
 };
 
 struct CameraUniformData
@@ -56,7 +47,7 @@ struct Scene
 
     CameraData camera;
 
-    RTAccelerationStructure tlas;
+    AccelerationStructureVulkan tlas;
 };
 
 struct App
@@ -127,14 +118,10 @@ void shutdownApp()
         destroyBufferVulkan(vk, app.scene.mesh.positions);
         destroyBufferVulkan(vk, app.scene.mesh.indices);
 
-        vkDestroyAccelerationStructureNV(vk.device, app.scene.mesh.blas.accelerationStructure, nullptr);
-        vkFreeMemory(vk.device, app.scene.mesh.blas.memory, nullptr);
+        destroyAccelerationStructure(vk, app.scene.mesh.blas);
     }
 
-    {
-        vkDestroyAccelerationStructureNV(vk.device, app.scene.tlas.accelerationStructure, nullptr);
-        vkFreeMemory(vk.device, app.scene.tlas.memory, nullptr);
-    }
+    destroyAccelerationStructure(vk, app.scene.tlas);
 
     vkDestroyShaderModule(vk.device, app.raygenShader, nullptr);
     vkDestroyShaderModule(vk.device, app.chitShader, nullptr);
@@ -203,44 +190,9 @@ void createScene()
         0.0f, 0.0f, 1.0f, 0.0f,
     };
 
-    {
-        VkAccelerationStructureInfoNV& accelerationStructureInfo = app.scene.mesh.blas.accelerationStructureInfo;
-        accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
-        accelerationStructureInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
-        accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
-        accelerationStructureInfo.geometryCount = 1;
-        accelerationStructureInfo.instanceCount = 0;
-        accelerationStructureInfo.pGeometries = &geometry;
-
-        VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
-        accelerationStructureCreateInfo.info = accelerationStructureInfo;
-
-        VK_CHECK(vkCreateAccelerationStructureNV(vk.device, &accelerationStructureCreateInfo, nullptr, &app.scene.mesh.blas.accelerationStructure));
-
-        VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
-        memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
-        memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
-        memoryRequirementsInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
-
-        VkMemoryRequirements2 memoryRequirements;
-        vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memoryRequirements);
-
-        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &app.scene.mesh.blas.memory));
-
-        VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
-        bindInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
-        bindInfo.memory = app.scene.mesh.blas.memory;
-        bindInfo.memoryOffset = 0;
-
-        vkBindAccelerationStructureMemoryNV(vk.device, 1, &bindInfo);
-
-        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, app.scene.mesh.blas.accelerationStructure, sizeof(uint64_t), &app.scene.mesh.blas.handle));
-    }
+    createAccelerationStructureVulkan(vk, {
+        VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV,
+        1, 0, &geometry }, &app.scene.mesh.blas);
 
     VkGeometryInstance instance;
     memcpy(instance.transform, transform, sizeof(transform));
@@ -255,46 +207,9 @@ void createScene()
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         &instance }, &app.instancesBuffer);
 
-    {
-        RTAccelerationStructure& as = app.scene.tlas;
-
-        VkAccelerationStructureInfoNV& accelerationStructureInfo = as.accelerationStructureInfo;
-        accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
-        accelerationStructureInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
-        accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
-        accelerationStructureInfo.geometryCount = 0;
-        accelerationStructureInfo.instanceCount = 1;
-        accelerationStructureInfo.pGeometries = nullptr;
-
-        VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
-        accelerationStructureCreateInfo.info = accelerationStructureInfo;
-
-        VK_CHECK(vkCreateAccelerationStructureNV(vk.device, &accelerationStructureCreateInfo, nullptr, &as.accelerationStructure));
-
-        VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
-        memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
-        memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
-        memoryRequirementsInfo.accelerationStructure = as.accelerationStructure;
-
-        VkMemoryRequirements2 memoryRequirements;
-        vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memoryRequirements);
-
-        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &as.memory));
-
-        VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
-        bindInfo.accelerationStructure = as.accelerationStructure;
-        bindInfo.memory = as.memory;
-        bindInfo.memoryOffset = 0;
-
-        vkBindAccelerationStructureMemoryNV(vk.device, 1, &bindInfo);
-
-        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, app.scene.mesh.blas.accelerationStructure, sizeof(uint64_t), &as.handle));
-    }
+    createAccelerationStructureVulkan(vk, {
+        VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV,
+        0, 1, nullptr }, &app.scene.tlas);
 
     // Build bottom/top AS
     
@@ -563,7 +478,7 @@ void createDescriptorSets()
     accelStructWrite.pTexelBufferView = nullptr;
 
     VkDescriptorImageInfo descOutputImageInfo = {};
-    descOutputImageInfo.imageView = app.offscreenImage.imageView;
+    descOutputImageInfo.imageView = app.offscreenImage.view;
     descOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkWriteDescriptorSet resImageWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
