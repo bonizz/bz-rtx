@@ -1,6 +1,6 @@
-[submodule "test1/external/glm"]
-	path = test1/external/glm
+[submodule "external/glm"]
+	path = external/glm
 	url = git@github.com:g-truc/glm.git
-[submodule "test1/external/volk"]
-	path = test1/external/volk
+[submodule "external/volk"]
+	path = external/volk
 	url = git@github.com:zeux/volk.git
