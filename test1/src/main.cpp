@@ -7,17 +7,6 @@
 
 
 
-struct ImageVulkan
-{
-    VkFormat format;
-    VkImage image;
-    VkDeviceMemory memory;
-    VkImageView imageView;
-    VkSampler sampler;
-};
-
-
-
 struct RTAccelerationStructure
 {
     VkDeviceMemory memory;
@@ -62,11 +51,6 @@ GLFWwindow* g_window;
 
 
 
-
-
-
-
-
 VkShaderModule g_raygenShader;
 VkShaderModule g_chitShader;
 VkShaderModule g_missShader;
@@ -107,8 +91,6 @@ Scene g_scene;
 
 
 DeviceVulkan vk;
-
-
 
 
 
@@ -170,60 +152,10 @@ bool initVulkan()
     if (!createDeviceVulkan({hwnd, kWindowWidth, kWindowHeight}, &vk))
         return false;
 
-    {
-        VkExtent3D imageExtent = { kWindowWidth, kWindowHeight, 1 };
-
-        auto& img = g_offscreenImage;
-        img = {};
-
-        img.format = vk.surfaceFormat.format;
-
-        VkImageCreateInfo imageCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-        imageCreateInfo.flags = 0;
-        imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageCreateInfo.format = img.format;
-        imageCreateInfo.extent = imageExtent;
-        imageCreateInfo.mipLevels = 1;
-        imageCreateInfo.arrayLayers = 1;
-        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageCreateInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageCreateInfo.queueFamilyIndexCount = 0;
-        imageCreateInfo.pQueueFamilyIndices = nullptr;
-        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        VK_CHECK(vkCreateImage(vk.device, &imageCreateInfo, nullptr, &img.image));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetImageMemoryRequirements(vk.device, img.image, &memoryRequirements);
-
-        VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memoryAllocateInfo.allocationSize = memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &img.memory));
-
-        VK_CHECK(vkBindImageMemory(vk.device, img.image, img.memory, 0));
-
-        VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        VkImageViewCreateInfo imageViewCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-        imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        imageViewCreateInfo.format = img.format;
-        imageViewCreateInfo.subresourceRange = range;
-        imageViewCreateInfo.image = img.image;
-        imageViewCreateInfo.flags = 0;
-        imageViewCreateInfo.components = {
-            VK_COMPONENT_SWIZZLE_R,
-            VK_COMPONENT_SWIZZLE_G,
-            VK_COMPONENT_SWIZZLE_B,
-            VK_COMPONENT_SWIZZLE_A
-        };
-
-        VK_CHECK(vkCreateImageView(vk.device, &imageViewCreateInfo, nullptr, &img.imageView));
-    }
+    createImageVulkan(vk, { VK_IMAGE_TYPE_2D, vk.surfaceFormat.format,
+        {kWindowWidth, kWindowHeight, 1},
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &g_offscreenImage);
 
     return true;
 }

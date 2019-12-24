@@ -305,17 +305,16 @@ void destroyDeviceVulkan(DeviceVulkan& deviceVulkan)
     // BONI TODO
 }
 
-bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* bufferVulkan)
+bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* pBuffer)
 {
+    auto& buff = *pBuffer;
+    buff.size = ci.size;
+
     VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferCreateInfo.flags = 0;
-    bufferCreateInfo.size = ci.size;
+    bufferCreateInfo.size = buff.size;
     bufferCreateInfo.usage = ci.usage;
     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    auto& buff = *bufferVulkan;
-
-    buff.size = ci.size;
 
     VkResult res = vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer);
     VK_CHECK(res);
@@ -362,5 +361,85 @@ void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer)
     vkDestroyBuffer(vk.device, buffer.buffer, nullptr);
     vkFreeMemory(vk.device, buffer.memory, nullptr);
     buffer = {};
+}
+
+bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, ImageVulkan* pImage)
+{
+    ImageVulkan& img = *pImage;
+    img.imageType = ci.imageType;
+    img.format = ci.format;
+    img.extent = ci.extent;
+
+    // BONI TODO: support other types
+    BASSERT(ci.imageType == VK_IMAGE_TYPE_2D);
+
+    VkImageCreateInfo imageCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imageCreateInfo.flags = 0;
+    imageCreateInfo.imageType = img.imageType;
+    imageCreateInfo.format = img.format;
+    imageCreateInfo.extent = img.extent;
+    imageCreateInfo.mipLevels = 1;
+    imageCreateInfo.arrayLayers = 1;
+    imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageCreateInfo.usage = ci.usage;
+    imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageCreateInfo.queueFamilyIndexCount = 0;
+    imageCreateInfo.pQueueFamilyIndices = nullptr;
+    imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkResult res = vkCreateImage(vk.device, &imageCreateInfo, nullptr, &img.image);
+    VK_CHECK(res);
+
+    if (res != VK_SUCCESS)
+    {
+        DebugPrint("Error: could not create image\n");
+        return false;
+    }
+
+    VkMemoryRequirements memoryRequirements;
+    vkGetImageMemoryRequirements(vk.device, img.image, &memoryRequirements);
+
+    VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    memoryAllocateInfo.allocationSize = memoryRequirements.size;
+    memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements,
+        ci.memoryProperties);
+
+    res = vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &img.memory);
+    VK_CHECK(res);
+
+    if (res != VK_SUCCESS)
+    {
+        DebugPrint("Error: could not allocate memory for image\n");
+        return false;
+    }
+
+    VK_CHECK(vkBindImageMemory(vk.device, img.image, img.memory, 0));
+
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+    VkImageViewCreateInfo imageViewCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    imageViewCreateInfo.format = img.format;
+    imageViewCreateInfo.subresourceRange = range;
+    imageViewCreateInfo.image = img.image;
+    imageViewCreateInfo.flags = 0;
+    imageViewCreateInfo.components = {
+        VK_COMPONENT_SWIZZLE_R,
+        VK_COMPONENT_SWIZZLE_G,
+        VK_COMPONENT_SWIZZLE_B,
+        VK_COMPONENT_SWIZZLE_A
+    };
+
+    VK_CHECK(vkCreateImageView(vk.device, &imageViewCreateInfo, nullptr, &img.imageView));
+
+    return true;
+}
+
+void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image)
+{
+    vkDestroyImageView(vk.device, image.imageView, nullptr);
+    vkFreeMemory(vk.device, image.memory, nullptr);
+    vkDestroyImage(vk.device, image.image, nullptr);
 }
 

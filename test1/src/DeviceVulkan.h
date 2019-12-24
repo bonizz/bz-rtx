@@ -22,6 +22,25 @@ struct BufferVulkanCreateInfo
     void* pSrc;
 };
 
+struct ImageVulkan
+{
+    VkImageType imageType;
+    VkFormat format;
+    VkExtent3D extent;
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView imageView;
+};
+
+struct ImageVulkanCreateInfo
+{
+    VkImageType imageType;
+    VkFormat format;
+    VkExtent3D extent;
+    VkImageUsageFlags usage;
+    VkMemoryPropertyFlags memoryProperties;
+};
+
 struct DeviceVulkan
 {
     VkInstance instance;
@@ -62,8 +81,10 @@ void destroyDeviceVulkan(DeviceVulkan& vk);
 
 uint32_t getMemoryTypeVulkan(const DeviceVulkan& vk, VkMemoryRequirements& memoryRequirements, VkMemoryPropertyFlags memoryProperties);
 
-bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* bufferVulkan);
+bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* pBuffer);
 
 void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer);
 
+bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, ImageVulkan* pImage);
 
+void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image);
