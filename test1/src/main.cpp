@@ -15,24 +15,6 @@ struct RTAccelerationStructure
     uint64_t handle;
 };
 
-struct Mesh
-{
-    uint32_t numVertices;
-    uint32_t numFaces;
-
-    BufferVulkan positions;
-    BufferVulkan indices;
-
-    RTAccelerationStructure blas;
-};
-
-struct Scene
-{
-    // BONI TODO: move meshes here
-
-    RTAccelerationStructure tlas;
-};
-
 struct VkGeometryInstance
 {
     float transform[12];
@@ -43,30 +25,16 @@ struct VkGeometryInstance
     uint64_t accelerationStructureHandle;
 };
 
+struct Mesh
+{
+    uint32_t numVertices;
+    uint32_t numFaces;
 
-uint32_t kWindowWidth = 800;
-uint32_t kWindowHeight = 600;
+    BufferVulkan positions;
+    BufferVulkan indices;
 
-GLFWwindow* g_window;
-
-
-VkShaderModule g_raygenShader;
-VkShaderModule g_chitShader;
-VkShaderModule g_missShader;
-
-ImageVulkan g_offscreenImage;
-
-BufferVulkan g_instancesBuffer;
-
-BufferVulkan g_sbtBuffer;
-
-VkPipelineLayout g_pipelineLayout;
-VkPipeline g_rtPipeline;
-
-VkDescriptorSetLayout g_descriptorSetLayout;
-VkDescriptorPool g_descriptorPool;
-VkDescriptorSet g_descriptorSet;
-
+    RTAccelerationStructure blas;
+};
 
 struct CameraUniformData
 {
@@ -82,51 +50,43 @@ struct CameraData
     BufferVulkan buffer;
 };
 
-CameraData g_camera;
-Mesh g_mesh;
-Scene g_scene;
-
-
-DeviceVulkan vk;
-
-
-
-bool loadShader(const char* filename, VkShaderModule* pShaderModule)
+struct Scene
 {
-    bool result = false;
+    Mesh mesh;
 
-    std::ifstream file(filename, std::ios::in | std::ios::binary);
-    if (file)
-    {
-        file.seekg(0, std::ios::end);
-        size_t fileSize = file.tellg();
-        file.seekg(0, std::ios::beg);
+    CameraData camera;
 
-        std::vector<char> bytecode(fileSize);
-        bytecode.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    RTAccelerationStructure tlas;
+};
 
-        VkShaderModuleCreateInfo ci = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-        ci.codeSize = fileSize;
-        ci.pCode = (uint32_t*)(bytecode.data());
-        ci.flags = 0;
+struct App
+{
+    GLFWwindow* window;
 
-        VkResult error = vkCreateShaderModule(vk.device, &ci, nullptr, pShaderModule);
-        VK_CHECK(error);
+    ImageVulkan offscreenImage;
 
-        result = error == VK_SUCCESS;
-    }
+    VkShaderModule raygenShader;
+    VkShaderModule chitShader;
+    VkShaderModule missShader;
 
-    if (!result)
-    {
-        DebugPrint("Error loading: %s\n", filename);
-        BASSERT(0);
-    }
+    BufferVulkan instancesBuffer;
+    BufferVulkan sbtBuffer;
 
-    return result;
-}
+    VkPipelineLayout pipelineLayout;
+    VkPipeline rtPipeline;
 
-// ------------
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptorSet;
 
+    Scene scene;
+};
+
+const uint32_t kWindowWidth = 800;
+const uint32_t kWindowHeight = 600;
+
+static DeviceVulkan vk;
+static App app;
 
 
 bool initApp()
@@ -139,12 +99,12 @@ bool initApp()
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    g_window = glfwCreateWindow(kWindowWidth, kWindowHeight, "Test Vulkan App", nullptr, nullptr);
+    app.window = glfwCreateWindow(kWindowWidth, kWindowHeight, "Test Vulkan App", nullptr, nullptr);
 
-    if (!g_window)
+    if (!app.window)
         return false;
 
-    HWND hwnd = glfwGetWin32Window(g_window);
+    HWND hwnd = glfwGetWin32Window(app.window);
 
     if (!createDeviceVulkan({hwnd, kWindowWidth, kWindowHeight}, &vk))
         return false;
@@ -152,7 +112,7 @@ bool initApp()
     createImageVulkan(vk, { VK_IMAGE_TYPE_2D, vk.surfaceFormat.format,
         {kWindowWidth, kWindowHeight, 1},
         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &g_offscreenImage);
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &app.offscreenImage);
 
     return true;
 }
@@ -161,40 +121,40 @@ void shutdownApp()
 {
     vkDeviceWaitIdle(vk.device);
 
-    destroyBufferVulkan(vk, g_camera.buffer);
+    destroyBufferVulkan(vk, app.scene. camera.buffer);
 
     {
-        destroyBufferVulkan(vk, g_mesh.positions);
-        destroyBufferVulkan(vk, g_mesh.indices);
+        destroyBufferVulkan(vk, app.scene.mesh.positions);
+        destroyBufferVulkan(vk, app.scene.mesh.indices);
 
-        vkDestroyAccelerationStructureNV(vk.device, g_mesh.blas.accelerationStructure, nullptr);
-        vkFreeMemory(vk.device, g_mesh.blas.memory, nullptr);
+        vkDestroyAccelerationStructureNV(vk.device, app.scene.mesh.blas.accelerationStructure, nullptr);
+        vkFreeMemory(vk.device, app.scene.mesh.blas.memory, nullptr);
     }
 
     {
-        vkDestroyAccelerationStructureNV(vk.device, g_scene.tlas.accelerationStructure, nullptr);
-        vkFreeMemory(vk.device, g_scene.tlas.memory, nullptr);
+        vkDestroyAccelerationStructureNV(vk.device, app.scene.tlas.accelerationStructure, nullptr);
+        vkFreeMemory(vk.device, app.scene.tlas.memory, nullptr);
     }
 
-    vkDestroyShaderModule(vk.device, g_raygenShader, nullptr);
-    vkDestroyShaderModule(vk.device, g_chitShader, nullptr);
-    vkDestroyShaderModule(vk.device, g_missShader, nullptr);
+    vkDestroyShaderModule(vk.device, app.raygenShader, nullptr);
+    vkDestroyShaderModule(vk.device, app.chitShader, nullptr);
+    vkDestroyShaderModule(vk.device, app.missShader, nullptr);
 
-    vkDestroyDescriptorPool(vk.device, g_descriptorPool, nullptr);
+    vkDestroyDescriptorPool(vk.device, app.descriptorPool, nullptr);
 
-    destroyBufferVulkan(vk, g_sbtBuffer);
+    destroyBufferVulkan(vk, app.sbtBuffer);
 
-    vkDestroyPipeline(vk.device, g_rtPipeline, nullptr);
-    vkDestroyPipelineLayout(vk.device, g_pipelineLayout, nullptr);
+    vkDestroyPipeline(vk.device, app.rtPipeline, nullptr);
+    vkDestroyPipelineLayout(vk.device, app.pipelineLayout, nullptr);
 
-    vkDestroyDescriptorSetLayout(vk.device, g_descriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(vk.device, app.descriptorSetLayout, nullptr);
 
-    destroyBufferVulkan(vk, g_instancesBuffer);
-    destroyImageVulkan(vk, g_offscreenImage);
+    destroyBufferVulkan(vk, app.instancesBuffer);
+    destroyImageVulkan(vk, app.offscreenImage);
 
     destroyDeviceVulkan(vk);
 
-    glfwDestroyWindow(g_window);
+    glfwDestroyWindow(app.window);
     glfwTerminate();
 }
 
@@ -210,27 +170,27 @@ void createScene()
     createBufferVulkan(vk, { sizeof(positions),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        positions }, &g_mesh.positions);
+        positions }, &app.scene.mesh.positions);
 
     createBufferVulkan(vk, { sizeof(indices),
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        indices }, &g_mesh.indices);
+        indices }, &app.scene.mesh.indices);
 
-    g_mesh.numVertices = 3;
-    g_mesh.numFaces = 1;
+    app.scene.mesh.numVertices = 3;
+    app.scene.mesh.numFaces = 1;
 
     VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
     geometry.geometry.triangles = { VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV };
-    geometry.geometry.triangles.vertexData = g_mesh.positions.buffer;
+    geometry.geometry.triangles.vertexData = app.scene.mesh.positions.buffer;
     geometry.geometry.triangles.vertexOffset = 0;
-    geometry.geometry.triangles.vertexCount = g_mesh.numVertices;
+    geometry.geometry.triangles.vertexCount = app.scene.mesh.numVertices;
     geometry.geometry.triangles.vertexStride = sizeof(float) * 3;
     geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geometry.geometry.triangles.indexData = g_mesh.indices.buffer;
+    geometry.geometry.triangles.indexData = app.scene.mesh.indices.buffer;
     geometry.geometry.triangles.indexOffset = 0;
-    geometry.geometry.triangles.indexCount = g_mesh.numFaces * 3;
+    geometry.geometry.triangles.indexCount = app.scene.mesh.numFaces * 3;
     geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32; // BONI TODO: switch to uint16
     geometry.geometry.triangles.transformData = VK_NULL_HANDLE;
     geometry.geometry.triangles.transformOffset = 0;
@@ -244,7 +204,7 @@ void createScene()
     };
 
     {
-        VkAccelerationStructureInfoNV& accelerationStructureInfo = g_mesh.blas.accelerationStructureInfo;
+        VkAccelerationStructureInfoNV& accelerationStructureInfo = app.scene.mesh.blas.accelerationStructureInfo;
         accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
         accelerationStructureInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
         accelerationStructureInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV;
@@ -255,12 +215,12 @@ void createScene()
         VkAccelerationStructureCreateInfoNV accelerationStructureCreateInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
         accelerationStructureCreateInfo.info = accelerationStructureInfo;
 
-        VK_CHECK(vkCreateAccelerationStructureNV(vk.device, &accelerationStructureCreateInfo, nullptr, &g_mesh.blas.accelerationStructure));
+        VK_CHECK(vkCreateAccelerationStructureNV(vk.device, &accelerationStructureCreateInfo, nullptr, &app.scene.mesh.blas.accelerationStructure));
 
         VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
         memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
         memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
-        memoryRequirementsInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
+        memoryRequirementsInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
 
         VkMemoryRequirements2 memoryRequirements;
         vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memoryRequirements);
@@ -270,16 +230,16 @@ void createScene()
         memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &g_mesh.blas.memory));
+        VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &app.scene.mesh.blas.memory));
 
         VkBindAccelerationStructureMemoryInfoNV bindInfo = { VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV };
-        bindInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
-        bindInfo.memory = g_mesh.blas.memory;
+        bindInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
+        bindInfo.memory = app.scene.mesh.blas.memory;
         bindInfo.memoryOffset = 0;
 
         vkBindAccelerationStructureMemoryNV(vk.device, 1, &bindInfo);
 
-        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, g_mesh.blas.accelerationStructure, sizeof(uint64_t), &g_mesh.blas.handle));
+        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, app.scene.mesh.blas.accelerationStructure, sizeof(uint64_t), &app.scene.mesh.blas.handle));
     }
 
     VkGeometryInstance instance;
@@ -288,15 +248,15 @@ void createScene()
     instance.mask = 0xFF;
     instance.instanceOffset = 0;
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
-    instance.accelerationStructureHandle = g_mesh.blas.handle;
+    instance.accelerationStructureHandle = app.scene.mesh.blas.handle;
 
     createBufferVulkan(vk, { sizeof(VkGeometryInstance),
         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        &instance }, &g_instancesBuffer);
+        &instance }, &app.instancesBuffer);
 
     {
-        RTAccelerationStructure& as = g_scene.tlas;
+        RTAccelerationStructure& as = app.scene.tlas;
 
         VkAccelerationStructureInfoNV& accelerationStructureInfo = as.accelerationStructureInfo;
         accelerationStructureInfo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV };
@@ -333,7 +293,7 @@ void createScene()
 
         vkBindAccelerationStructureMemoryNV(vk.device, 1, &bindInfo);
 
-        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, g_mesh.blas.accelerationStructure, sizeof(uint64_t), &as.handle));
+        VK_CHECK(vkGetAccelerationStructureHandleNV(vk.device, app.scene.mesh.blas.accelerationStructure, sizeof(uint64_t), &as.handle));
     }
 
     // Build bottom/top AS
@@ -343,7 +303,7 @@ void createScene()
     memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
 
     VkDeviceSize maxBlasSize = 0;
-    memoryRequirementsInfo.accelerationStructure = g_mesh.blas.accelerationStructure;
+    memoryRequirementsInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
 
     VkMemoryRequirements2 memReqBlas;
     vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memReqBlas);
@@ -351,7 +311,7 @@ void createScene()
     maxBlasSize = memReqBlas.memoryRequirements.size;
 
     VkMemoryRequirements2 memReqTlas;
-    memoryRequirementsInfo.accelerationStructure = g_scene.tlas.accelerationStructure;
+    memoryRequirementsInfo.accelerationStructure = app.scene.tlas.accelerationStructure;
     vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memReqTlas);
 
     VkDeviceSize scratchBufferSize = std::max(maxBlasSize, memReqTlas.memoryRequirements.size);
@@ -378,11 +338,11 @@ void createScene()
     memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
     memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
 
-    g_mesh.blas.accelerationStructureInfo.instanceCount = 0;
-    g_mesh.blas.accelerationStructureInfo.geometryCount = 1;
-    g_mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
-    vkCmdBuildAccelerationStructureNV(cmdBuffer, &g_mesh.blas.accelerationStructureInfo,
-            VK_NULL_HANDLE, 0, VK_FALSE, g_mesh.blas.accelerationStructure,
+    app.scene.mesh.blas.accelerationStructureInfo.instanceCount = 0;
+    app.scene.mesh.blas.accelerationStructureInfo.geometryCount = 1;
+    app.scene.mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
+    vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.mesh.blas.accelerationStructureInfo,
+            VK_NULL_HANDLE, 0, VK_FALSE, app.scene.mesh.blas.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
     vkCmdPipelineBarrier(cmdBuffer,
@@ -390,11 +350,11 @@ void createScene()
             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             0, 1, &memoryBarrier, 0, 0, 0, 0);
 
-    g_scene.tlas.accelerationStructureInfo.instanceCount = 1;
-    g_scene.tlas.accelerationStructureInfo.geometryCount = 0;
-    g_scene.tlas.accelerationStructureInfo.pGeometries = nullptr;
-    vkCmdBuildAccelerationStructureNV(cmdBuffer, &g_scene.tlas.accelerationStructureInfo,
-            g_instancesBuffer.buffer, 0, VK_FALSE, g_scene.tlas.accelerationStructure,
+    app.scene.tlas.accelerationStructureInfo.instanceCount = 1;
+    app.scene.tlas.accelerationStructureInfo.geometryCount = 0;
+    app.scene.tlas.accelerationStructureInfo.pGeometries = nullptr;
+    vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.tlas.accelerationStructureInfo,
+            app.instancesBuffer.buffer, 0, VK_FALSE, app.scene.tlas.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
     vkCmdPipelineBarrier(cmdBuffer,
@@ -423,11 +383,11 @@ void setupCamera()
     createBufferVulkan(vk, { sizeof(CameraUniformData),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT },
-        &g_camera.buffer);
+        &app.scene.camera.buffer);
 
-    g_camera.perspective = glm::perspective(glm::radians(60.f),
+    app.scene.camera.perspective = glm::perspective(glm::radians(60.f),
             float(kWindowWidth) / kWindowHeight, 0.1f, 512.f);
-    g_camera.view = glm::translate(glm::mat4(1.f), glm::vec3(0, 0, -2.5f));
+    app.scene.camera.view = glm::translate(glm::mat4(1.f), glm::vec3(0, 0, -2.5f));
 }
 
 void createDescriptorSetLayouts()
@@ -466,7 +426,7 @@ void createDescriptorSetLayouts()
     set0LayoutInfo.bindingCount = (uint32_t)std::size(bindings);
     set0LayoutInfo.pBindings = bindings;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set0LayoutInfo, nullptr, &g_descriptorSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set0LayoutInfo, nullptr, &app.descriptorSetLayout));
 }
 
 void createRaytracingPipeline()
@@ -474,28 +434,28 @@ void createRaytracingPipeline()
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     pipelineLayoutCreateInfo.flags = 0;
     pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &g_descriptorSetLayout;
+    pipelineLayoutCreateInfo.pSetLayouts = &app.descriptorSetLayout;
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
 
-    VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutCreateInfo, nullptr, &g_pipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutCreateInfo, nullptr, &app.pipelineLayout));
 
-    loadShader("shaders/raygen.rgen.spv", &g_raygenShader);
-    loadShader("shaders/chit.rchit.spv", &g_chitShader);
-    loadShader("shaders/miss.rmiss.spv", &g_missShader);
+    createShaderVulkan(vk, "shaders/raygen.rgen.spv", &app.raygenShader);
+    createShaderVulkan(vk, "shaders/chit.rchit.spv", &app.chitShader);
+    createShaderVulkan(vk, "shaders/miss.rmiss.spv", &app.missShader);
 
     VkPipelineShaderStageCreateInfo raygenStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     raygenStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_NV;
-    raygenStage.module = g_raygenShader;
+    raygenStage.module = app.raygenShader;
     raygenStage.pName = "main";
 
     VkPipelineShaderStageCreateInfo chitStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     chitStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
-    chitStage.module = g_chitShader;
+    chitStage.module = app.chitShader;
     chitStage.pName = "main";
 
     VkPipelineShaderStageCreateInfo missStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     missStage.stage = VK_SHADER_STAGE_MISS_BIT_NV;
-    missStage.module = g_missShader;
+    missStage.module = app.missShader;
     missStage.pName = "main";
 
     VkRayTracingShaderGroupCreateInfoNV raygenGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
@@ -537,9 +497,9 @@ void createRaytracingPipeline()
     rayPipelineInfo.groupCount = (uint32_t)std::size(groups);
     rayPipelineInfo.pGroups = groups;
     rayPipelineInfo.maxRecursionDepth = 1;
-    rayPipelineInfo.layout = g_pipelineLayout;
+    rayPipelineInfo.layout = app.pipelineLayout;
 
-    VK_CHECK(vkCreateRayTracingPipelinesNV(vk.device, VK_NULL_HANDLE, 1, &rayPipelineInfo, nullptr, &g_rtPipeline));
+    VK_CHECK(vkCreateRayTracingPipelinesNV(vk.device, VK_NULL_HANDLE, 1, &rayPipelineInfo, nullptr, &app.rtPipeline));
 }
 
 void createShaderBindingTable()
@@ -548,18 +508,18 @@ void createShaderBindingTable()
 
     createBufferVulkan(vk, { sbtSize,
         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT }, &g_sbtBuffer);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT }, &app.sbtBuffer);
 
     // Put shader group handles in SBT memory
-    std::vector<char> tmp(g_sbtBuffer.size);
+    std::vector<char> tmp(app.sbtBuffer.size);
 
     int numGroups = 3; // raygen, 1 hit, 1 miss
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(vk.device, g_rtPipeline, 0, numGroups, g_sbtBuffer.size, tmp.data()));
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(vk.device, app.rtPipeline, 0, numGroups, app.sbtBuffer.size, tmp.data()));
 
     void* sbtBufferMemory = nullptr;
-    VK_CHECK(vkMapMemory(vk.device, g_sbtBuffer.memory, 0, g_sbtBuffer.size, 0, &sbtBufferMemory));
+    VK_CHECK(vkMapMemory(vk.device, app.sbtBuffer.memory, 0, app.sbtBuffer.size, 0, &sbtBufferMemory));
     memcpy(sbtBufferMemory, tmp.data(), tmp.size());
-    vkUnmapMemory(vk.device, g_sbtBuffer.memory);
+    vkUnmapMemory(vk.device, app.sbtBuffer.memory);
 }
 
 void createDescriptorSets()
@@ -575,26 +535,26 @@ void createDescriptorSets()
     descPoolCreateInfo.pPoolSizes = poolSizes;
     descPoolCreateInfo.maxSets = 1;
 
-    VK_CHECK(vkCreateDescriptorPool(vk.device, &descPoolCreateInfo, nullptr, &g_descriptorPool));
+    VK_CHECK(vkCreateDescriptorPool(vk.device, &descPoolCreateInfo, nullptr, &app.descriptorPool));
 
     VkDescriptorSetLayout setLayouts[] = {
-        g_descriptorSetLayout
+        app.descriptorSetLayout
     };
 
     VkDescriptorSetAllocateInfo descSetAllocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    descSetAllocInfo.descriptorPool = g_descriptorPool;
+    descSetAllocInfo.descriptorPool = app.descriptorPool;
     descSetAllocInfo.pSetLayouts = setLayouts;
     descSetAllocInfo.descriptorSetCount = 1;
 
-    VK_CHECK(vkAllocateDescriptorSets(vk.device, &descSetAllocInfo, &g_descriptorSet));
+    VK_CHECK(vkAllocateDescriptorSets(vk.device, &descSetAllocInfo, &app.descriptorSet));
 
     VkWriteDescriptorSetAccelerationStructureNV descAccelStructInfo = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV };
     descAccelStructInfo.accelerationStructureCount = 1;
-    descAccelStructInfo.pAccelerationStructures = &g_scene.tlas.accelerationStructure;
+    descAccelStructInfo.pAccelerationStructures = &app.scene.tlas.accelerationStructure;
 
     VkWriteDescriptorSet accelStructWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     accelStructWrite.pNext = &descAccelStructInfo;
-    accelStructWrite.dstSet = g_descriptorSet;
+    accelStructWrite.dstSet = app.descriptorSet;
     accelStructWrite.dstBinding = 0;
     accelStructWrite.descriptorCount = 1;
     accelStructWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
@@ -603,11 +563,11 @@ void createDescriptorSets()
     accelStructWrite.pTexelBufferView = nullptr;
 
     VkDescriptorImageInfo descOutputImageInfo = {};
-    descOutputImageInfo.imageView = g_offscreenImage.imageView;
+    descOutputImageInfo.imageView = app.offscreenImage.imageView;
     descOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkWriteDescriptorSet resImageWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    resImageWrite.dstSet = g_descriptorSet;
+    resImageWrite.dstSet = app.descriptorSet;
     resImageWrite.dstBinding = 1;
     resImageWrite.descriptorCount = 1;
     resImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -616,12 +576,12 @@ void createDescriptorSets()
     resImageWrite.pTexelBufferView = nullptr;
 
     VkDescriptorBufferInfo camdataBufferInfo = {};
-    camdataBufferInfo.buffer = g_camera.buffer.buffer;
+    camdataBufferInfo.buffer = app.scene.camera.buffer.buffer;
     camdataBufferInfo.offset = 0;
-    camdataBufferInfo.range = g_camera.buffer.size;
+    camdataBufferInfo.range = app.scene.camera.buffer.size;
 
     VkWriteDescriptorSet camdataBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    camdataBufferWrite.dstSet = g_descriptorSet;
+    camdataBufferWrite.dstSet = app.descriptorSet;
     camdataBufferWrite.dstBinding = 2;
     camdataBufferWrite.descriptorCount = 1;
     camdataBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -663,7 +623,7 @@ void fillCommandBuffers()
         imageMemoryBarrier1.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         imageMemoryBarrier1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         imageMemoryBarrier1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageMemoryBarrier1.image = g_offscreenImage.image;
+        imageMemoryBarrier1.image = app.offscreenImage.image;
         imageMemoryBarrier1.subresourceRange = subresourceRange;
 
         vkCmdPipelineBarrier(cmdBuffer,
@@ -671,23 +631,23 @@ void fillCommandBuffers()
             0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier1);
 
         {
-            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_NV, g_rtPipeline);
+            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_NV, app.rtPipeline);
 
             vkCmdBindDescriptorSets(cmdBuffer,
                 VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
-                g_pipelineLayout, 0,
-                1, &g_descriptorSet,
+                app.pipelineLayout, 0,
+                1, &app.descriptorSet,
                 0, 0);
 
             uint32_t stride = vk.rtProps.shaderGroupHandleSize;
 
             vkCmdTraceRaysNV(cmdBuffer,
                 // raygen
-                g_sbtBuffer.buffer, 0,
+                app.sbtBuffer.buffer, 0,
                 // miss
-                g_sbtBuffer.buffer, stride * 2, stride,
+                app.sbtBuffer.buffer, stride * 2, stride,
                 // hit
-                g_sbtBuffer.buffer, stride * 1, stride,
+                app.sbtBuffer.buffer, stride * 1, stride,
                 // callable
                 VK_NULL_HANDLE, 0, 0,
                 kWindowWidth, kWindowHeight, 1);
@@ -718,7 +678,7 @@ void fillCommandBuffers()
         imageMemoryBarrier3.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         imageMemoryBarrier3.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         imageMemoryBarrier3.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageMemoryBarrier3.image = g_offscreenImage.image;
+        imageMemoryBarrier3.image = app.offscreenImage.image;
         imageMemoryBarrier3.subresourceRange = subresourceRange;
 
         vkCmdPipelineBarrier(cmdBuffer,
@@ -733,7 +693,7 @@ void fillCommandBuffers()
         copyRegion.extent = { kWindowWidth, kWindowHeight, 1 };
 
         vkCmdCopyImage(cmdBuffer,
-            g_offscreenImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            app.offscreenImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             vk.swapchainImages[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &copyRegion);
 
@@ -777,7 +737,7 @@ int main()
     // BONI TODO: do this every frame
     fillCommandBuffers();
 
-    while (!glfwWindowShouldClose(g_window))
+    while (!glfwWindowShouldClose(app.window))
     {
         uint32_t imageIndex = 0;
         VK_CHECK(vkAcquireNextImageKHR(vk.device, vk.swapchain, UINT64_MAX, vk.semaphoreImageAcquired, nullptr, &imageIndex));
@@ -789,15 +749,15 @@ int main()
         // Update camera
         {
             CameraUniformData camData;
-            camData.viewInverse = glm::inverse(g_camera.view);
-            camData.projInverse = glm::inverse(g_camera.perspective);
+            camData.viewInverse = glm::inverse(app.scene.camera.view);
+            camData.projInverse = glm::inverse(app.scene.camera.perspective);
 
             void* mem = nullptr;
-            VK_CHECK(vkMapMemory(vk.device, g_camera.buffer.memory, 0, g_camera.buffer.size, 0, &mem));
+            VK_CHECK(vkMapMemory(vk.device, app.scene.camera.buffer.memory, 0, app.scene.camera.buffer.size, 0, &mem));
 
             memcpy(mem, &camData, sizeof(CameraUniformData));
 
-            vkUnmapMemory(vk.device, g_camera.buffer.memory);
+            vkUnmapMemory(vk.device, app.scene.camera.buffer.memory);
         }
 
         const VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

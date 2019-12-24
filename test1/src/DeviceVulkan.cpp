@@ -475,3 +475,37 @@ void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image)
     vkDestroyImage(vk.device, image.image, nullptr);
 }
 
+bool createShaderVulkan(const DeviceVulkan& vk, const char* filename, VkShaderModule* pShaderModule)
+{
+    bool result = false;
+
+    std::ifstream file(filename, std::ios::in | std::ios::binary);
+    if (file)
+    {
+        file.seekg(0, std::ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> bytecode(fileSize);
+        bytecode.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+        VkShaderModuleCreateInfo ci = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        ci.codeSize = fileSize;
+        ci.pCode = (uint32_t*)(bytecode.data());
+        ci.flags = 0;
+
+        VkResult error = vkCreateShaderModule(vk.device, &ci, nullptr, pShaderModule);
+        VK_CHECK(error);
+
+        result = error == VK_SUCCESS;
+    }
+
+    if (!result)
+    {
+        DebugPrint("Error loading: %s\n", filename);
+        BASSERT(0);
+    }
+
+    return result;
+}
+

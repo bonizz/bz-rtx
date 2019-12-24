@@ -88,3 +88,6 @@ void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer);
 bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, ImageVulkan* pImage);
 
 void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image);
+
+bool createShaderVulkan(const DeviceVulkan& vk, const char* filename, VkShaderModule* pShaderModule);
+
