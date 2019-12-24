@@ -6,9 +6,24 @@
     } \
 } while (false)
 
+
+struct BufferVulkan
+{
+    VkDeviceSize size;
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+};
+
+struct BufferVulkanCreateInfo
+{
+    VkDeviceSize size;
+    VkBufferUsageFlags usage;
+    VkMemoryPropertyFlags memoryProperties;
+    void* pSrc;
+};
+
 struct DeviceVulkan
 {
-
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
@@ -32,10 +47,23 @@ struct DeviceVulkan
     VkSemaphore semaphoreImageAcquired;
     VkSemaphore semaphoreRenderFinished;
     VkDebugReportCallbackEXT debugCallback;
-
 };
 
-bool createDeviceVulkan(void* hwnd, uint32_t windowWidth, uint32_t windowHeight, DeviceVulkan* deviceVulkan);
+struct DeviceVulkanCreateInfo
+{
+    void* hwnd;
+    uint32_t windowWidth;
+    uint32_t windowHeight;
+};
 
-void destroyDeviceVulkan(DeviceVulkan& deviceVulkan);
+bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVulkan);
+
+void destroyDeviceVulkan(DeviceVulkan& vk);
+
+uint32_t getMemoryTypeVulkan(const DeviceVulkan& vk, VkMemoryRequirements& memoryRequirements, VkMemoryPropertyFlags memoryProperties);
+
+bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* bufferVulkan);
+
+void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer);
+
 

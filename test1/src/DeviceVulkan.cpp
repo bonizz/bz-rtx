@@ -46,7 +46,27 @@ static VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfac
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-bool createDeviceVulkan(void* hwnd, uint32_t windowWidth, uint32_t windowHeight, DeviceVulkan* deviceVulkan)
+uint32_t getMemoryTypeVulkan(const DeviceVulkan& vk, VkMemoryRequirements& memoryRequirements, VkMemoryPropertyFlags memoryProperties)
+{
+    uint32_t result = 0;
+
+    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++)
+    {
+        if (memoryRequirements.memoryTypeBits & (1 << i))
+        {
+            if ((vk.physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & memoryProperties)
+                == memoryProperties)
+            {
+                result = i;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVulkan)
 {
     DeviceVulkan& vk = *deviceVulkan;
 
@@ -171,7 +191,7 @@ bool createDeviceVulkan(void* hwnd, uint32_t windowWidth, uint32_t windowHeight,
 
     VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = { VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
     surfaceCreateInfo.hinstance = GetModuleHandle(nullptr);
-    surfaceCreateInfo.hwnd = (HWND)hwnd;
+    surfaceCreateInfo.hwnd = (HWND)ci.hwnd;
 
     VK_CHECK(vkCreateWin32SurfaceKHR(vk.instance, &surfaceCreateInfo, nullptr, &vk.surface));
 
@@ -209,8 +229,8 @@ bool createDeviceVulkan(void* hwnd, uint32_t windowWidth, uint32_t windowHeight,
     swapchainCreateInfo.minImageCount = surfaceCapabilities.minImageCount;
     swapchainCreateInfo.imageFormat = vk.surfaceFormat.format;
     swapchainCreateInfo.imageColorSpace = vk.surfaceFormat.colorSpace;
-    swapchainCreateInfo.imageExtent.width = windowWidth;
-    swapchainCreateInfo.imageExtent.height = windowHeight;
+    swapchainCreateInfo.imageExtent.width = ci.windowWidth;
+    swapchainCreateInfo.imageExtent.height = ci.windowHeight;
     swapchainCreateInfo.imageArrayLayers = 1;
     swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -283,5 +303,64 @@ bool createDeviceVulkan(void* hwnd, uint32_t windowWidth, uint32_t windowHeight,
 void destroyDeviceVulkan(DeviceVulkan& deviceVulkan)
 {
     // BONI TODO
+}
+
+bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci, BufferVulkan* bufferVulkan)
+{
+    VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    bufferCreateInfo.flags = 0;
+    bufferCreateInfo.size = ci.size;
+    bufferCreateInfo.usage = ci.usage;
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    auto& buff = *bufferVulkan;
+
+    buff.size = ci.size;
+
+    VkResult res = vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer);
+    VK_CHECK(res);
+
+    if (res != VK_SUCCESS)
+    {
+        DebugPrint("Error: could not create buffer of size %ld\n", buff.size);
+        return false;
+    }
+
+    VkMemoryRequirements memoryRequirements;
+    vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
+
+    VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    memAllocInfo.allocationSize = memoryRequirements.size;
+    memAllocInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements, ci.memoryProperties);
+
+    res = vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory);
+    VK_CHECK(res);
+
+    if (res != VK_SUCCESS)
+    {
+        DebugPrint("Error: could not allocate memory for buffer\n");
+        return false;
+    }
+
+    VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
+
+    if (ci.pSrc)
+    {
+        void* mem = nullptr;
+        VK_CHECK(vkMapMemory(vk.device, buff.memory, 0, buff.size, 0, &mem));
+
+        memcpy(mem, ci.pSrc, buff.size);
+
+        vkUnmapMemory(vk.device, buff.memory);
+    }
+
+    return true;
+}
+
+void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer)
+{
+    vkDestroyBuffer(vk.device, buffer.buffer, nullptr);
+    vkFreeMemory(vk.device, buffer.memory, nullptr);
+    buffer = {};
 }
 

@@ -16,12 +16,7 @@ struct ImageVulkan
     VkSampler sampler;
 };
 
-struct BufferVulkan
-{
-    VkDeviceSize size;
-    VkBuffer buffer;
-    VkDeviceMemory memory;
-};
+
 
 struct RTAccelerationStructure
 {
@@ -116,25 +111,6 @@ DeviceVulkan vk;
 
 
 
-uint32_t getMemoryType(VkMemoryRequirements& memoryRequirements, VkMemoryPropertyFlags memoryProperties)
-{
-    uint32_t result = 0;
-
-    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++)
-    {
-        if (memoryRequirements.memoryTypeBits & (1 << i))
-        {
-            if ((vk.physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & memoryProperties)
-                    == memoryProperties)
-            {
-                result = i;
-                break;
-            }
-        }
-    }
-
-    return result;
-}
 
 bool loadShader(const char* filename, VkShaderModule* pShaderModule)
 {
@@ -191,7 +167,7 @@ bool initVulkan()
 
     HWND hwnd = glfwGetWin32Window(g_window);
 
-    if (!createDeviceVulkan(hwnd, kWindowWidth, kWindowHeight, &vk))
+    if (!createDeviceVulkan({hwnd, kWindowWidth, kWindowHeight}, &vk))
         return false;
 
     {
@@ -224,7 +200,7 @@ bool initVulkan()
 
         VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         memoryAllocateInfo.allocationSize = memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &img.memory));
@@ -261,75 +237,15 @@ void createScene()
     };
     uint32_t indices[] = { 0, 1, 2 };
 
-    {
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sizeof(positions);
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createBufferVulkan(vk, { sizeof(positions),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        positions }, &g_mesh.positions);
 
-        auto& buff = g_mesh.positions;
-
-        buff.size = sizeof(positions);
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-
-        void* mem = nullptr;
-        VkDeviceSize size = buff.size;
-        int offset = 0;
-        VK_CHECK(vkMapMemory(vk.device, buff.memory, offset, size, 0, &mem));
-
-        memcpy(mem, positions, size);
-
-        vkUnmapMemory(vk.device, buff.memory);
-    }
-
-    {
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sizeof(indices);
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        auto& buff = g_mesh.indices;
-
-        buff.size = sizeof(indices);
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-
-        void* mem = nullptr;
-        VkDeviceSize size = buff.size;
-        int offset = 0;
-        VK_CHECK(vkMapMemory(vk.device, buff.memory, offset, size, 0, &mem));
-
-        memcpy(mem, indices, size);
-
-        vkUnmapMemory(vk.device, buff.memory);
-    }
+    createBufferVulkan(vk, { sizeof(indices),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        indices }, &g_mesh.indices);
 
     g_mesh.numVertices = 3;
     g_mesh.numFaces = 1;
@@ -381,7 +297,7 @@ void createScene()
 
         VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements.memoryRequirements,
+        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &g_mesh.blas.memory));
@@ -404,41 +320,10 @@ void createScene()
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
     instance.accelerationStructureHandle = g_mesh.blas.handle;
 
-    
-    {
-        auto& buff = g_instancesBuffer;
-
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sizeof(VkGeometryInstance);
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        buff.size = sizeof(VkGeometryInstance);
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-
-        void* mem = nullptr;
-        VkDeviceSize size = buff.size;
-        int offset = 0;
-        VK_CHECK(vkMapMemory(vk.device, buff.memory, offset, size, 0, &mem));
-
-        memcpy(mem, &instance, size);
-
-        vkUnmapMemory(vk.device, buff.memory);
-    }
+    createBufferVulkan(vk, { sizeof(VkGeometryInstance),
+        VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &instance }, &g_instancesBuffer);
 
     {
         RTAccelerationStructure& as = g_scene.tlas;
@@ -466,7 +351,7 @@ void createScene()
 
         VkMemoryAllocateInfo memoryAllocateInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         memoryAllocateInfo.allocationSize = memoryRequirements.memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = getMemoryType(memoryRequirements.memoryRequirements,
+        memoryAllocateInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements.memoryRequirements,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VK_CHECK(vkAllocateMemory(vk.device, &memoryAllocateInfo, nullptr, &as.memory));
@@ -502,31 +387,10 @@ void createScene()
     VkDeviceSize scratchBufferSize = std::max(maxBlasSize, memReqTlas.memoryRequirements.size);
 
     BufferVulkan scratchBuffer;
-    {
-        auto& buff = scratchBuffer;
 
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = scratchBufferSize;
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        buff.size = scratchBufferSize;
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-    }
+    createBufferVulkan(vk, { scratchBufferSize,
+    VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &scratchBuffer);
 
     VkCommandBufferAllocateInfo commandBufferAllocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     commandBufferAllocateInfo.commandPool = vk.commandPool;
@@ -581,11 +445,7 @@ void createScene()
 
     vkFreeCommandBuffers(vk.device, vk.commandPool, 1, &cmdBuffer);
 
-    {
-        vkDestroyBuffer(vk.device, scratchBuffer.buffer, nullptr);
-        vkFreeMemory(vk.device, scratchBuffer.memory, nullptr);
-        scratchBuffer = {};
-    }
+    destroyBufferVulkan(vk, scratchBuffer);
 }
 
 void setupCamera()
@@ -609,7 +469,7 @@ void setupCamera()
 
         VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
+        memAllocInfo.memoryTypeIndex = getMemoryTypeVulkan(vk, memoryRequirements,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
@@ -736,33 +596,11 @@ void createRaytracingPipeline()
 
 void createShaderBindingTable()
 {
-    {
-        auto& buff = g_sbtBuffer;
+    uint32_t sbtSize = vk.rtProps.shaderGroupHandleSize * 3;
 
-        uint32_t sbtSize = vk.rtProps.shaderGroupHandleSize * 3;
-
-        VkBufferCreateInfo bufferCreateInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferCreateInfo.flags = 0;
-        bufferCreateInfo.size = sbtSize;
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        buff.size = sbtSize;
-
-        VK_CHECK(vkCreateBuffer(vk.device, &bufferCreateInfo, nullptr, &buff.buffer));
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(vk.device, buff.buffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memAllocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        memAllocInfo.allocationSize = memoryRequirements.size;
-        memAllocInfo.memoryTypeIndex = getMemoryType(memoryRequirements,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-
-        VK_CHECK(vkAllocateMemory(vk.device, &memAllocInfo, nullptr, &buff.memory));
-
-        VK_CHECK(vkBindBufferMemory(vk.device, buff.buffer, buff.memory, 0));
-    }
+    createBufferVulkan(vk, { sbtSize,
+        VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT }, &g_sbtBuffer);
 
     // Put shader group handles in SBT memory
     std::vector<char> tmp(g_sbtBuffer.size);
