@@ -1,8 +1,8 @@
-workspace "test1"
+workspace "sample-triangle"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test1"
+project "sample-triangle"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
