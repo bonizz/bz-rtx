@@ -3,7 +3,9 @@
 #include "logging.h"
 #include "DeviceVulkan.h"
 
-static bool kEnableValidation = true;
+// validation layers appear to interfere with nsight /shrug
+// renderdoc currently not supported with raytracing
+static bool s_enableValidation = true;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT flags,
     VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location,
@@ -87,7 +89,10 @@ bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVu
 
     std::vector<const char*> layers;
 
-    if (kEnableValidation)
+    HMODULE module = GetModuleHandle(L"Nvda.Graphics.Interception.dll");
+    s_enableValidation &= module == nullptr;
+
+    if (s_enableValidation)
     {
         extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
         layers.push_back("VK_LAYER_LUNARG_standard_validation");
@@ -110,6 +115,7 @@ bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVu
 
     volkLoadInstance(vk.instance);
 
+    if (s_enableValidation)
     {
         VkDebugReportCallbackCreateInfoEXT callbackCreateInfo = { VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT };
         callbackCreateInfo.flags =
@@ -323,7 +329,8 @@ void destroyDeviceVulkan(DeviceVulkan& vk)
 
     vkDestroyDevice(vk.device, nullptr);
 
-    vkDestroyDebugReportCallbackEXT(vk.instance, vk.debugCallback, nullptr);
+    if (vk.debugCallback)
+        vkDestroyDebugReportCallbackEXT(vk.instance, vk.debugCallback, nullptr);
 
     vkDestroyInstance(vk.instance, nullptr);
 
