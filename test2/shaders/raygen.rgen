@@ -1,0 +1,40 @@
+#version 460
+#extension GL_NV_ray_tracing : require
+#extension GL_GOOGLE_include_directive : require
+
+#include "shader-common.h"
+
+layout(set = 0, binding = 0) uniform accelerationStructureNV Scene;
+layout(set = 0, binding = 1, rgba8) uniform image2D ResultImage;
+layout(set = 0, binding = 2, std140) uniform AppData { UniformParams Params; };
+
+layout(location = 0) rayPayloadNV RayPayload PrimaryRay;
+
+void main()
+{
+    const vec2 pixelCenter = vec2(gl_LaunchIDNV.xy) + vec2(0.5);
+    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeNV.xy);
+    vec2 d = inUV * 2.0 - 1.0;
+
+    vec4 origin = Params.viewInverse * vec4(0., 0., 0., 1.);
+    vec4 target = Params.projInverse * vec4(d.x, d.y, 1., 1.);
+    vec4 direction = Params.viewInverse * vec4(normalize(target.xyz), 0.);
+
+    uint rayFlags = gl_RayFlagsOpaqueNV;
+    uint cullMask = 0xFF;
+    float tmin = 0.001;
+    float tmax = 10000.0;
+
+    traceNV(Scene, rayFlags, cullMask,
+        0, // sbtRecordOffset
+        0, // sbtRecordSize
+        0, // missIndex
+        origin.xyz,
+        tmin, direction.xyz, tmax,
+        0 // payload
+    );
+
+    imageStore(ResultImage, ivec2(gl_LaunchIDNV.xy), vec4(PrimaryRay.color, 0.));
+}
+
+
