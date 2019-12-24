@@ -45,6 +45,7 @@
     <IntDir>obj\Win64\Debug\</IntDir>
     <TargetName>test1_D</TargetName>
     <TargetExt>.exe</TargetExt>
+    <CustomBuildAfterTargets>Build</CustomBuildAfterTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Win64|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -75,8 +76,12 @@
       </Command>
     </CustomBuildStep>
     <PreBuildEvent>
-      <Command>cd $(ProjectDir)\shaders &amp;&amp; call build-shaders.bat</Command>
+      <Command>
+      </Command>
     </PreBuildEvent>
+    <PostBuildEvent>
+      <Command>cd $(ProjectDir)\shaders &amp;&amp; call build-shaders.bat</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Win64|x64'">
     <ClCompile>

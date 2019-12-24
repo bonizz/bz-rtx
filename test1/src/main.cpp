@@ -1009,10 +1009,10 @@ void createRaytracingPipeline()
 
     VkRayTracingShaderGroupCreateInfoNV chitGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
     chitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_NV;
-    raygenGroup.generalShader = VK_SHADER_UNUSED_NV;
-    raygenGroup.closestHitShader = 1;
-    raygenGroup.anyHitShader = VK_SHADER_UNUSED_NV;
-    raygenGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+    chitGroup.generalShader = VK_SHADER_UNUSED_NV;
+    chitGroup.closestHitShader = 1;
+    chitGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    chitGroup.intersectionShader = VK_SHADER_UNUSED_NV;
 
     VkRayTracingShaderGroupCreateInfoNV missGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
     missGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
@@ -1078,9 +1078,23 @@ void createShaderBindingTable()
     VK_CHECK(vkMapMemory(g_device, g_sbtBuffer.memory, 0, g_sbtBuffer.size, 0, &sbtBufferMemory));
 
     // We only need the handles
+    std::vector<char> tmp(g_sbtBuffer.size);
+
     int numGroups = 3; // raygen, 1 hit, 1 miss
     VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(g_device, g_rtPipeline, 0,
-                numGroups, g_sbtBuffer.size, sbtBufferMemory));
+        //numGroups, g_sbtBuffer.size, sbtBufferMemory));
+        numGroups, g_sbtBuffer.size, tmp.data()));
+
+    std::vector<char> group1(16);
+    std::vector<char> group2(16);
+    std::vector<char> group3(16);
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(g_device, g_rtPipeline, 0, 1, 16, group1.data()));
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(g_device, g_rtPipeline, 1, 1, 16, group2.data()));
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(g_device, g_rtPipeline, 2, 1, 16, group3.data()));
+
+    memcpy(sbtBufferMemory, tmp.data(), tmp.size());
+
+
 
     vkUnmapMemory(g_device, g_sbtBuffer.memory);
 }
@@ -1344,6 +1358,8 @@ int main()
         presentInfo.pImageIndices = &imageIndex;
 
         VK_CHECK(vkQueuePresentKHR(g_queue, &presentInfo));
+
+        Sleep(10);
 
         glfwPollEvents();
     }
