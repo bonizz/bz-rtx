@@ -750,6 +750,9 @@
     <ClInclude Include="..\external\volk\volk.h">
       <Filter>external\volk</Filter>
     </ClInclude>
+    <ClInclude Include="src\Camera.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="src\DeviceVulkan.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -763,6 +766,9 @@
   <ItemGroup>
     <ClCompile Include="..\external\volk\volk.c">
       <Filter>external\volk</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Camera.cpp">
+      <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\DeviceVulkan.cpp">
       <Filter>src</Filter>

@@ -2,9 +2,8 @@
 #include "pch.h"
 
 #include "logging.h"
-
 #include "DeviceVulkan.h"
-
+#include "camera.h"
 
 struct VkGeometryInstance
 {
@@ -38,14 +37,14 @@ struct CameraData
     glm::mat4 view;
     glm::mat4 perspective;
 
-    BufferVulkan buffer;
 };
 
 struct Scene
 {
     Mesh mesh;
 
-    CameraData camera;
+    Camera camera;
+    BufferVulkan cameraBuffer;
 
     AccelerationStructureVulkan tlas;
 };
@@ -70,11 +69,17 @@ struct App
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
 
+    bool keysDown[GLFW_KEY_LAST + 1];
+    bool mouseDown[GLFW_MOUSE_BUTTON_LAST + 1];
+    glm::vec2 cursorPos;
+
     Scene scene;
 };
 
 const uint32_t kWindowWidth = 800;
 const uint32_t kWindowHeight = 600;
+const float kCameraRotationSpeed = 0.25f;
+const float kCameraMoveSpeed = 2.f;
 
 static DeviceVulkan vk;
 static App app;
@@ -112,7 +117,7 @@ void shutdownApp()
 {
     vkDeviceWaitIdle(vk.device);
 
-    destroyBufferVulkan(vk, app.scene. camera.buffer);
+    destroyBufferVulkan(vk, app.scene.cameraBuffer);
 
     {
         destroyBufferVulkan(vk, app.scene.mesh.positions);
@@ -298,11 +303,13 @@ void setupCamera()
     createBufferVulkan(vk, { sizeof(CameraUniformData),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT },
-        &app.scene.camera.buffer);
+        &app.scene.cameraBuffer);
 
-    app.scene.camera.perspective = glm::perspective(glm::radians(60.f),
-            float(kWindowWidth) / kWindowHeight, 0.1f, 512.f);
-    app.scene.camera.view = glm::translate(glm::mat4(1.f), glm::vec3(0, 0, -2.5f));
+    app.scene.camera.viewport = { 0, 0, kWindowWidth, kWindowHeight };
+    app.scene.camera.position = glm::vec3(0, 0, -2.5f);
+    app.scene.camera.direction = glm::vec3(0, 0, 1.f);
+    cameraUpdateView(app.scene.camera);
+    cameraUpdateProjection(app.scene.camera);
 }
 
 void createDescriptorSetLayouts()
@@ -491,9 +498,9 @@ void createDescriptorSets()
     resImageWrite.pTexelBufferView = nullptr;
 
     VkDescriptorBufferInfo camdataBufferInfo = {};
-    camdataBufferInfo.buffer = app.scene.camera.buffer.buffer;
+    camdataBufferInfo.buffer = app.scene.cameraBuffer.buffer;
     camdataBufferInfo.offset = 0;
-    camdataBufferInfo.range = app.scene.camera.buffer.size;
+    camdataBufferInfo.range = app.scene.cameraBuffer.size;
 
     VkWriteDescriptorSet camdataBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     camdataBufferWrite.dstSet = app.descriptorSet;
@@ -631,6 +638,37 @@ void fillCommandBuffers()
 
 }
 
+void updateCamera(const float dt)
+{
+    Camera& cam = app.scene.camera;
+
+    glm::vec3 moveDelta(0.f, 0.f, 0.f);
+
+    if (app.keysDown[GLFW_KEY_W]) moveDelta.z += 1.f;
+    if (app.keysDown[GLFW_KEY_S]) moveDelta.z -= 1.f;
+    if (app.keysDown[GLFW_KEY_A]) moveDelta.x -= 1.f;
+    if (app.keysDown[GLFW_KEY_D]) moveDelta.x += 1.f;
+    if (app.keysDown[GLFW_KEY_Q]) moveDelta.y += 1.f;
+    if (app.keysDown[GLFW_KEY_E]) moveDelta.y -= 1.f;
+
+    moveDelta *= kCameraMoveSpeed * dt;
+    cameraMove(cam, moveDelta);
+
+    cameraUpdateView(cam);
+
+
+    CameraUniformData camData;
+    camData.viewInverse = glm::inverse(app.scene.camera.view);
+    camData.projInverse = glm::inverse(app.scene.camera.projection);
+
+    void* mem = nullptr;
+    VK_CHECK(vkMapMemory(vk.device, app.scene.cameraBuffer.memory, 0, app.scene.cameraBuffer.size, 0, &mem));
+
+    memcpy(mem, &camData, sizeof(CameraUniformData));
+
+    vkUnmapMemory(vk.device, app.scene.cameraBuffer.memory);
+}
+
 
 int main()
 {
@@ -652,8 +690,36 @@ int main()
     // BONI TODO: do this every frame
     fillCommandBuffers();
 
+    glfwSetKeyCallback(app.window, [](auto* wnd, int key, int scancode, int action, int mods) {
+        if ((action == GLFW_PRESS || action == GLFW_RELEASE) && key <= GLFW_KEY_LAST)
+            app.keysDown[key] = action == GLFW_PRESS;
+    });
+
+    glfwSetMouseButtonCallback(app.window, [](auto* wnd, int button, int action, int mods) {
+        if ((action == GLFW_PRESS || action == GLFW_RELEASE) && button <= GLFW_MOUSE_BUTTON_LAST)
+            app.mouseDown[button] = action == GLFW_PRESS;
+    });
+
+    glfwSetCursorPosCallback(app.window, [](auto* wnd, double x, double y) {
+        glm::vec2 newPos = glm::vec2(float(x), float(y));
+
+        if (app.mouseDown[GLFW_MOUSE_BUTTON_1])
+        {
+            glm::vec2 delta = app.cursorPos - newPos;
+            cameraRotate(app.scene.camera, delta.x * kCameraRotationSpeed, -delta.y * kCameraRotationSpeed);
+        }
+
+        app.cursorPos = newPos;
+    });
+
+    double prevTime = 0.;
+
     while (!glfwWindowShouldClose(app.window))
     {
+        double currTime = glfwGetTime();
+        double dt = std::min(currTime - prevTime, 2.);
+        prevTime = currTime;
+
         uint32_t imageIndex = 0;
         VK_CHECK(vkAcquireNextImageKHR(vk.device, vk.swapchain, UINT64_MAX, vk.semaphoreImageAcquired, nullptr, &imageIndex));
 
@@ -661,19 +727,7 @@ int main()
         VK_CHECK(vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX));
         vkResetFences(vk.device, 1, &fence);
 
-        // Update camera
-        {
-            CameraUniformData camData;
-            camData.viewInverse = glm::inverse(app.scene.camera.view);
-            camData.projInverse = glm::inverse(app.scene.camera.perspective);
-
-            void* mem = nullptr;
-            VK_CHECK(vkMapMemory(vk.device, app.scene.camera.buffer.memory, 0, app.scene.camera.buffer.size, 0, &mem));
-
-            memcpy(mem, &camData, sizeof(CameraUniformData));
-
-            vkUnmapMemory(vk.device, app.scene.camera.buffer.memory);
-        }
+        updateCamera(float(dt));
 
         const VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
