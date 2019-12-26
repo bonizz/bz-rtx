@@ -217,15 +217,20 @@ bool loadGltfFile(const char* fn, Mesh* pMesh)
 
         auto& bv = model.bufferViews[model.accessors[idNormal].bufferView];
 
-        std::vector<glm::vec3> dbgNormals(bv.byteLength / 12);
-        memcpy(dbgNormals.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
+        std::vector<glm::vec3> vec3Normals(model.accessors[idNormal].count);
+        BASSERT(vec3Normals.size() * sizeof(glm::vec3) == bv.byteLength);
+        memcpy(vec3Normals.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
 
+        // Convert to vec4 for padding when accessed in shader
+        std::vector<glm::vec4> vec4Normals;
+        vec4Normals.reserve(model.accessors[idNormal].count);
+        for (const auto& n : vec3Normals)
+            vec4Normals.emplace_back(n.x, n.y, n.z, 0.f);
 
-        createBufferVulkan(vk, { bv.byteLength,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        createBufferVulkan(vk, { vec4Normals.size() * sizeof(glm::vec4),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &model.buffers[bv.buffer].data[bv.byteOffset] },
+            vec4Normals.data() },
             &app.scene.mesh.normals);
     }
 
@@ -409,9 +414,8 @@ void createDescriptorSetLayouts()
     //   Binding 1 -> output image
     //   Binding 2 -> camera data
     // --
-    //   Binding 3 -> positions (vec3)
-    //   Binding 4 -> normals (vec3)
-    //   Binding 5 -> indices (uint)
+    //   Binding 3 -> normals (vec4)
+    //   Binding 4 -> indices (uint)
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
     asLayoutBinding.binding = 0;
@@ -431,20 +435,14 @@ void createDescriptorSetLayouts()
     cameraDataLayoutBinding.descriptorCount = 1;
     cameraDataLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
 
-    VkDescriptorSetLayoutBinding positionsLayoutBinding = {};
-    positionsLayoutBinding.binding = 3;
-    positionsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    positionsLayoutBinding.descriptorCount = 1;
-    positionsLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
-
     VkDescriptorSetLayoutBinding normalsLayoutBinding = {};
-    normalsLayoutBinding.binding = 4;
+    normalsLayoutBinding.binding = 3;
     normalsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     normalsLayoutBinding.descriptorCount = 1;
     normalsLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
 
     VkDescriptorSetLayoutBinding indicesLayoutBinding = {};
-    indicesLayoutBinding.binding = 5;
+    indicesLayoutBinding.binding = 4;
     indicesLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     indicesLayoutBinding.descriptorCount = 1;
     indicesLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
@@ -453,7 +451,6 @@ void createDescriptorSetLayouts()
         asLayoutBinding,
         outputImageLayoutBinding,
         cameraDataLayoutBinding,
-        positionsLayoutBinding,
         normalsLayoutBinding,
         indicesLayoutBinding
     };
@@ -564,8 +561,9 @@ void createDescriptorSets()
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // camera data
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // normals
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // indices
     };
 
     VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -627,20 +625,6 @@ void createDescriptorSets()
     camdataBufferWrite.pBufferInfo = &camdataBufferInfo;
     camdataBufferWrite.pTexelBufferView = nullptr;
 
-    VkDescriptorBufferInfo positionsBufferInfo = {};
-    positionsBufferInfo.buffer = app.scene.mesh.positions.buffer;
-    positionsBufferInfo.offset = 0;
-    positionsBufferInfo.range = VK_WHOLE_SIZE;
-
-    VkWriteDescriptorSet positionsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    positionsBufferWrite.dstSet = app.descriptorSet;
-    positionsBufferWrite.dstBinding = 3;
-    positionsBufferWrite.descriptorCount = 1;
-    positionsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    positionsBufferWrite.pImageInfo = nullptr;
-    positionsBufferWrite.pBufferInfo = &positionsBufferInfo;
-    positionsBufferWrite.pTexelBufferView = nullptr;
-
     VkDescriptorBufferInfo normalsBufferInfo = {};
     normalsBufferInfo.buffer = app.scene.mesh.normals.buffer;
     normalsBufferInfo.offset = 0;
@@ -648,7 +632,7 @@ void createDescriptorSets()
 
     VkWriteDescriptorSet normalsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     normalsBufferWrite.dstSet = app.descriptorSet;
-    normalsBufferWrite.dstBinding = 4;
+    normalsBufferWrite.dstBinding = 3;
     normalsBufferWrite.descriptorCount = 1;
     normalsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     normalsBufferWrite.pImageInfo = nullptr;
@@ -662,7 +646,7 @@ void createDescriptorSets()
 
     VkWriteDescriptorSet indicesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     indicesBufferWrite.dstSet = app.descriptorSet;
-    indicesBufferWrite.dstBinding = 5;
+    indicesBufferWrite.dstBinding = 4;
     indicesBufferWrite.descriptorCount = 1;
     indicesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     indicesBufferWrite.pImageInfo = nullptr;
@@ -673,7 +657,6 @@ void createDescriptorSets()
         accelStructWrite,
         resImageWrite,
         camdataBufferWrite,
-        positionsBufferWrite,
         normalsBufferWrite,
         indicesBufferWrite
     };

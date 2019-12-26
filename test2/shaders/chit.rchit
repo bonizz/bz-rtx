@@ -5,9 +5,8 @@
 
 #include "shader-common.h"
 
-layout(set = 0, binding = 3, std430) buffer PositionsBuffer { vec3 p[]; } Positions;
-layout(set = 0, binding = 4, std430) buffer NormalsBuffer { vec3 n[]; } Normals;
-layout(set = 0, binding = 5, std430) buffer IndicesBuffer { uint i[]; } Indices;
+layout(set = 0, binding = 3) readonly buffer NormalsBuffer { vec4 n[]; } Normals;
+layout(set = 0, binding = 4) readonly buffer IndicesBuffer { uint i[]; } Indices;
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -34,9 +33,9 @@ void main()
     // vec3 p1 = Positions.p[ind.y];
     // vec3 p2 = Positions.p[ind.z];
 
-    vec3 n0 = Normals.n[ind.x];
-    vec3 n1 = Normals.n[ind.y];
-    vec3 n2 = Normals.n[ind.z];
+    vec3 n0 = Normals.n[ind.x].xyz;
+    vec3 n1 = Normals.n[ind.y].xyz;
+    vec3 n2 = Normals.n[ind.z].xyz;
 
     vec3 N = normalize(interpolate(n0, n1, n2, barycentrics));
 
@@ -49,7 +48,9 @@ void main()
 
     // PrimaryRay.color = normal;
 
-    PrimaryRay.color = vec3(ndotl + 0.01);
+    PrimaryRay.color = vec3(ndotl + 0.1);
+
+    // PrimaryRay.color = N;
 
 
     // PrimaryRay.color = vec3(0., 0., 1.);
