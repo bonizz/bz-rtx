@@ -15,7 +15,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT 
     {
         DebugPrint("Validation Error: [%s] %s", pLayerPrefix, pMessage);
         BASSERT(!"validation error");
-
     }
     else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT)
     {

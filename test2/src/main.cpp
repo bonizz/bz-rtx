@@ -21,6 +21,7 @@ struct Mesh
     uint32_t numFaces;
 
     BufferVulkan positions;
+    BufferVulkan normals;
     BufferVulkan indices;
 
     AccelerationStructureVulkan blas;
@@ -121,6 +122,7 @@ void shutdownApp()
 
     {
         destroyBufferVulkan(vk, app.scene.mesh.positions);
+        destroyBufferVulkan(vk, app.scene.mesh.normals);
         destroyBufferVulkan(vk, app.scene.mesh.indices);
 
         destroyAccelerationStructure(vk, app.scene.mesh.blas);
@@ -194,17 +196,37 @@ bool loadGltfFile(const char* fn, Mesh* pMesh)
 
         pMesh->numVertices = (uint32_t)model.accessors[idPosition].count;
 
-        auto& bvPosition = model.bufferViews[model.accessors[idPosition].bufferView];
+        auto& bv = model.bufferViews[model.accessors[idPosition].bufferView];
 
-        std::vector<glm::vec3> positions(pMesh->numVertices);
-        memcpy(positions.data(), &model.buffers[bvPosition.buffer].data[bvPosition.byteOffset],
-            bvPosition.byteLength);
+        std::vector<glm::vec3> dbgPositions(bv.byteLength / 12);
+        memcpy(dbgPositions.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
 
-        createBufferVulkan(vk, { bvPosition.byteLength,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        createBufferVulkan(vk, { bv.byteLength,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &model.buffers[bvPosition.buffer].data[bvPosition.byteOffset] },
+            &model.buffers[bv.buffer].data[bv.byteOffset] },
             &app.scene.mesh.positions);
+    }
+
+    {
+        BASSERT(idNormal >= 0);
+
+        BASSERT(model.accessors[idNormal].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
+            && model.accessors[idNormal].type == TINYGLTF_TYPE_VEC3);
+
+        auto& bv = model.bufferViews[model.accessors[idNormal].bufferView];
+
+        std::vector<glm::vec3> dbgNormals(bv.byteLength / 12);
+        memcpy(dbgNormals.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
+
+
+        createBufferVulkan(vk, { bv.byteLength,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &model.buffers[bv.buffer].data[bv.byteOffset] },
+            &app.scene.mesh.normals);
     }
 
     {
@@ -216,17 +238,18 @@ bool loadGltfFile(const char* fn, Mesh* pMesh)
 
         std::vector<uint16_t> indices16(indexCount);
 
-        auto& bvIndices = model.bufferViews[model.accessors[idIndices].bufferView];
+        auto& bv = model.bufferViews[model.accessors[idIndices].bufferView];
 
-        memcpy(indices16.data(), &model.buffers[bvIndices.buffer].data[bvIndices.byteOffset],
-            bvIndices.byteLength);
+        memcpy(indices16.data(), &model.buffers[bv.buffer].data[bv.byteOffset],
+            bv.byteLength);
 
         std::vector<uint32_t> indices32(indexCount);
         for (int i = 0; i < indexCount; i++)
             indices32[i] = indices16[i];
 
         createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             indices32.data() }, &app.scene.mesh.indices);
     }
@@ -385,6 +408,10 @@ void createDescriptorSetLayouts()
     //   Binding 0 -> AS
     //   Binding 1 -> output image
     //   Binding 2 -> camera data
+    // --
+    //   Binding 3 -> positions (vec3)
+    //   Binding 4 -> normals (vec3)
+    //   Binding 5 -> indices (uint)
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
     asLayoutBinding.binding = 0;
@@ -404,10 +431,31 @@ void createDescriptorSetLayouts()
     cameraDataLayoutBinding.descriptorCount = 1;
     cameraDataLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
 
+    VkDescriptorSetLayoutBinding positionsLayoutBinding = {};
+    positionsLayoutBinding.binding = 3;
+    positionsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    positionsLayoutBinding.descriptorCount = 1;
+    positionsLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+    VkDescriptorSetLayoutBinding normalsLayoutBinding = {};
+    normalsLayoutBinding.binding = 4;
+    normalsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    normalsLayoutBinding.descriptorCount = 1;
+    normalsLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+    VkDescriptorSetLayoutBinding indicesLayoutBinding = {};
+    indicesLayoutBinding.binding = 5;
+    indicesLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    indicesLayoutBinding.descriptorCount = 1;
+    indicesLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
     VkDescriptorSetLayoutBinding bindings[] = {
         asLayoutBinding,
         outputImageLayoutBinding,
-        cameraDataLayoutBinding
+        cameraDataLayoutBinding,
+        positionsLayoutBinding,
+        normalsLayoutBinding,
+        indicesLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo set0LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -516,7 +564,8 @@ void createDescriptorSets()
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
     };
 
     VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -578,10 +627,55 @@ void createDescriptorSets()
     camdataBufferWrite.pBufferInfo = &camdataBufferInfo;
     camdataBufferWrite.pTexelBufferView = nullptr;
 
+    VkDescriptorBufferInfo positionsBufferInfo = {};
+    positionsBufferInfo.buffer = app.scene.mesh.positions.buffer;
+    positionsBufferInfo.offset = 0;
+    positionsBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet positionsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    positionsBufferWrite.dstSet = app.descriptorSet;
+    positionsBufferWrite.dstBinding = 3;
+    positionsBufferWrite.descriptorCount = 1;
+    positionsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    positionsBufferWrite.pImageInfo = nullptr;
+    positionsBufferWrite.pBufferInfo = &positionsBufferInfo;
+    positionsBufferWrite.pTexelBufferView = nullptr;
+
+    VkDescriptorBufferInfo normalsBufferInfo = {};
+    normalsBufferInfo.buffer = app.scene.mesh.normals.buffer;
+    normalsBufferInfo.offset = 0;
+    normalsBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet normalsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    normalsBufferWrite.dstSet = app.descriptorSet;
+    normalsBufferWrite.dstBinding = 4;
+    normalsBufferWrite.descriptorCount = 1;
+    normalsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    normalsBufferWrite.pImageInfo = nullptr;
+    normalsBufferWrite.pBufferInfo = &normalsBufferInfo;
+    normalsBufferWrite.pTexelBufferView = nullptr;
+
+    VkDescriptorBufferInfo indicesBufferInfo = {};
+    indicesBufferInfo.buffer = app.scene.mesh.indices.buffer;
+    indicesBufferInfo.offset = 0;
+    indicesBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet indicesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    indicesBufferWrite.dstSet = app.descriptorSet;
+    indicesBufferWrite.dstBinding = 5;
+    indicesBufferWrite.descriptorCount = 1;
+    indicesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    indicesBufferWrite.pImageInfo = nullptr;
+    indicesBufferWrite.pBufferInfo = &indicesBufferInfo;
+    indicesBufferWrite.pTexelBufferView = nullptr;
+
     VkWriteDescriptorSet descriptorWrites[] = {
         accelStructWrite,
         resImageWrite,
-        camdataBufferWrite
+        camdataBufferWrite,
+        positionsBufferWrite,
+        normalsBufferWrite,
+        indicesBufferWrite
     };
 
     vkUpdateDescriptorSets(vk.device, (uint32_t)std::size(descriptorWrites), descriptorWrites, 0, VK_NULL_HANDLE);
