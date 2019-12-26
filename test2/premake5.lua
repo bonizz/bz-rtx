@@ -1,8 +1,8 @@
-workspace "test2"
+workspace "sample-gltf"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test2"
+project "sample-gltf"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"

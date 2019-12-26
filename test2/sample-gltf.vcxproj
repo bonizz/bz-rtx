@@ -11,10 +11,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{37756B10-A389-93C1-6C0B-3721D8DE8FF2}</ProjectGuid>
+    <ProjectGuid>{E1BE6CBA-4D74-E5AF-D668-DF86421DDCB3}</ProjectGuid>
     <IgnoreWarnCompileDuplicatedFilename>true</IgnoreWarnCompileDuplicatedFilename>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>test2</RootNamespace>
+    <RootNamespace>sample-gltf</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win64|x64'" Label="Configuration">
@@ -43,14 +43,14 @@
     <LinkIncremental>true</LinkIncremental>
     <OutDir>bin\Win64\Debug\</OutDir>
     <IntDir>obj\Win64\Debug\</IntDir>
-    <TargetName>test2_D</TargetName>
+    <TargetName>sample-gltf_D</TargetName>
     <TargetExt>.exe</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Win64|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>bin\Win64\Release\</OutDir>
     <IntDir>obj\Win64\Release\</IntDir>
-    <TargetName>test2</TargetName>
+    <TargetName>sample-gltf</TargetName>
     <TargetExt>.exe</TargetExt>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win64|x64'">
