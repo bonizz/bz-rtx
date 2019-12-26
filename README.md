@@ -1,6 +1,6 @@
 # Vulkan RTX samples
 
-## sample-triangle
+### 001-sample-triangle
 
 Simple triangle example.
 
@@ -9,4 +9,8 @@ Refs:
 * https://github.com/SaschaWillems/Vulkan
 * https://developer.nvidia.com/rtx/raytracing/vkray
 
+
+### 002-sample-gltf
+
+Loads single-mesh gltf file.
 
