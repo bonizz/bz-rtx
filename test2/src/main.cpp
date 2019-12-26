@@ -257,7 +257,7 @@ bool loadGltfFile(const char* fn, Mesh* pMesh)
 
 void createScene()
 {
-    bool res = loadGltfFile("data/test-sphere.gltf", &app.scene.mesh);
+    bool res = loadGltfFile("data/icosphere-4-subd.gltf", &app.scene.mesh);
     BASSERT(res);
 
     VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
