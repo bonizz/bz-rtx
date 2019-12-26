@@ -33,13 +33,6 @@ struct CameraUniformData
     glm::mat4 projInverse;
 };
 
-struct CameraData
-{
-    glm::mat4 view;
-    glm::mat4 perspective;
-
-};
-
 struct Scene
 {
     Mesh mesh;
@@ -400,11 +393,14 @@ void setupCamera()
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT },
         &app.scene.cameraBuffer);
 
-    app.scene.camera.viewport = { 0, 0, kWindowWidth, kWindowHeight };
-    app.scene.camera.position = glm::vec3(0, 0, -2.5f);
-    app.scene.camera.direction = glm::vec3(0, 0, 1.f);
-    cameraUpdateView(app.scene.camera);
-    cameraUpdateProjection(app.scene.camera);
+    Camera& cam = app.scene.camera;
+
+    cam.viewport = { 0, 0, kWindowWidth, kWindowHeight };
+    cam.position = glm::vec3(0, 0, 2.5f);
+    cam.up = glm::vec3(0, 1, 0);
+    cam.forward = glm::vec3(0, 0, -1.f);
+    cameraUpdateView(cam);
+    cameraUpdateProjection(cam);
 }
 
 void createDescriptorSetLayouts()
@@ -850,7 +846,7 @@ int main()
         if (app.mouseDown[GLFW_MOUSE_BUTTON_1])
         {
             glm::vec2 delta = app.cursorPos - newPos;
-            cameraRotate(app.scene.camera, delta.x * kCameraRotationSpeed, -delta.y * kCameraRotationSpeed);
+            cameraRotate(app.scene.camera, delta.x * kCameraRotationSpeed, delta.y * kCameraRotationSpeed);
         }
 
         app.cursorPos = newPos;

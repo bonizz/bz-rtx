@@ -12,13 +12,29 @@ layout(location = 0) rayPayloadNV RayPayload PrimaryRay;
 
 void main()
 {
-    const vec2 pixelCenter = vec2(gl_LaunchIDNV.xy) + vec2(0.5);
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeNV.xy);
-    vec2 d = inUV * 2.0 - 1.0;
+    // https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays
+    vec2 pixelRaster = gl_LaunchIDNV.xy;
+    vec2 imageSize = gl_LaunchSizeNV.xy;
 
-    vec4 origin = Params.viewInverse * vec4(0., 0., 0., 1.);
-    vec4 target = Params.projInverse * vec4(d.x, d.y, 1., 1.);
-    vec4 direction = Params.viewInverse * vec4(normalize(target.xyz), 0.);
+    // Compute raytacing NDC (note range [0,1])
+    vec2 pixelNDC = (pixelRaster + vec2(0.5)) / imageSize;
+
+    // Remap to range [-1, 1]
+    vec2 pixelSS = pixelNDC * 2.0 - 1.0;
+
+    // Y is reversed (since raster, NDC & screen space have pos Y pointing down)
+    pixelSS.y = 1.0 - 2.0 * pixelNDC.y;
+
+    // Compute camera/view space.  proj has fov, near, far
+    vec4 pixelCS = Params.projInverse * vec4(pixelSS.x, pixelSS.y, 0., 1.);
+
+    // Camera is at origin in camera space.  Compute direction to pixel in camera spce.
+    vec4 originCS = vec4(0., 0., 0., 1.);
+    vec4 directionCS = vec4(normalize((pixelCS - originCS).xyz), 0.);
+
+    // Compute world space values
+    vec4 directionWS = Params.viewInverse * directionCS;
+    vec4 originWS = Params.viewInverse * vec4(0., 0., 0., 1.);
 
     uint rayFlags = gl_RayFlagsOpaqueNV;
     uint cullMask = 0xFF;
@@ -29,8 +45,8 @@ void main()
         0, // sbtRecordOffset
         0, // sbtRecordSize
         0, // missIndex
-        origin.xyz,
-        tmin, direction.xyz, tmax,
+        originWS.xyz,
+        tmin, directionWS.xyz, tmax,
         0 // payload
     );
 
