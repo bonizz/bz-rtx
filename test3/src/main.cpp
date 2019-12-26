@@ -788,8 +788,8 @@ void updateCamera(const float dt)
     if (app.keysDown[GLFW_KEY_S]) moveDelta.z -= 1.f;
     if (app.keysDown[GLFW_KEY_A]) moveDelta.x -= 1.f;
     if (app.keysDown[GLFW_KEY_D]) moveDelta.x += 1.f;
-    if (app.keysDown[GLFW_KEY_Q]) moveDelta.y += 1.f;
-    if (app.keysDown[GLFW_KEY_E]) moveDelta.y -= 1.f;
+    if (app.keysDown[GLFW_KEY_Q]) moveDelta.y -= 1.f;
+    if (app.keysDown[GLFW_KEY_E]) moveDelta.y += 1.f;
 
     moveDelta *= kCameraMoveSpeed * dt;
     cameraMove(cam, moveDelta);
