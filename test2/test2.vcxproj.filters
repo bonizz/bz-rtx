@@ -31,6 +31,9 @@
     <Filter Include="external\glm\glm\gtx">
       <UniqueIdentifier>{A84358C0-94D2-E189-3DF1-F584295FF22F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="external\glm\util">
+      <UniqueIdentifier>{44FD0707-B013-069D-F98A-91BE65E0D624}</UniqueIdentifier>
+    </Filter>
     <Filter Include="external\volk">
       <UniqueIdentifier>{134DC243-7F0D-3E7A-4848-87F7B4C78256}</UniqueIdentifier>
     </Filter>
@@ -782,5 +785,10 @@
     <ClCompile Include="src\pch.cpp">
       <Filter>src</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="..\external\glm\util\glm.natvis">
+      <Filter>external\glm\util</Filter>
+    </Natvis>
   </ItemGroup>
 </Project>

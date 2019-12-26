@@ -34,6 +34,7 @@ project "test2"
     files {
         "../external/glfw/include/**.h",
         "../external/glm/glm/**.hpp",
+        "../external/glm/util/glm.natvis",
         "../external/volk/volk.h",
         "../external/volk/volk.c",
         "src/**.h",
