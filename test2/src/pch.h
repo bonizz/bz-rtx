@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <fstream>
+#include <string>
 
 #pragma warning(push)
 #pragma warning(disable: 26812)
@@ -27,3 +28,5 @@
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
+
+#include <tiny_gltf.h>

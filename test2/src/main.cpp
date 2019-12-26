@@ -150,27 +150,94 @@ void shutdownApp()
     glfwTerminate();
 }
 
+bool loadGltfFile(const char* fn, Mesh* pMesh)
+{
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+
+    std::string err;
+    std::string warn;
+    bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, fn);
+    BASSERT(ret);
+
+    if (ret == false)
+    {
+        DebugPrint("Error: could not load %s\n", fn);
+        return false;
+    }
+
+    BASSERT(model.meshes.size() > 0);
+
+    // BONI TEMP: Only handle 1 mesh for now
+    BASSERT(model.meshes.size() == 1);
+
+    auto& primitives = model.meshes[0].primitives;
+
+    BASSERT(primitives.size() > 0);
+
+    // BONI TEMP: Only handle 1 triangles primitive for now
+    BASSERT(primitives.size() == 1);
+    BASSERT(primitives[0].mode == TINYGLTF_MODE_TRIANGLES);
+
+    auto& attrs = primitives[0].attributes;
+
+    int idPosition = attrs.count("POSITION") == 1 ? attrs["POSITION"] : -1;
+    int idNormal = attrs.count("NORMAL") == 1 ? attrs["NORMAL"] : -1;
+    int idTexcoord0 = attrs.count("TEXCOORD_0") == 1 ? attrs["TEXCOORD_0"] : -1;
+    int idIndices = primitives[0].indices;
+
+    {
+        BASSERT(idPosition >= 0);
+
+        BASSERT(model.accessors[idPosition].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
+            && model.accessors[idPosition].type == TINYGLTF_TYPE_VEC3);
+
+        pMesh->numVertices = (uint32_t)model.accessors[idPosition].count;
+
+        auto& bvPosition = model.bufferViews[model.accessors[idPosition].bufferView];
+
+        std::vector<glm::vec3> positions(pMesh->numVertices);
+        memcpy(positions.data(), &model.buffers[bvPosition.buffer].data[bvPosition.byteOffset],
+            bvPosition.byteLength);
+
+        createBufferVulkan(vk, { bvPosition.byteLength,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &model.buffers[bvPosition.buffer].data[bvPosition.byteOffset] },
+            &app.scene.mesh.positions);
+    }
+
+    {
+        BASSERT(model.accessors[idIndices].componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT
+            && model.accessors[idIndices].type == TINYGLTF_TYPE_SCALAR);
+
+        int indexCount = (uint32_t)model.accessors[idIndices].count;
+        pMesh->numFaces = (uint32_t)(model.accessors[idIndices].count / 3);
+
+        std::vector<uint16_t> indices16(indexCount);
+
+        auto& bvIndices = model.bufferViews[model.accessors[idIndices].bufferView];
+
+        memcpy(indices16.data(), &model.buffers[bvIndices.buffer].data[bvIndices.byteOffset],
+            bvIndices.byteLength);
+
+        std::vector<uint32_t> indices32(indexCount);
+        for (int i = 0; i < indexCount; i++)
+            indices32[i] = indices16[i];
+
+        createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            indices32.data() }, &app.scene.mesh.indices);
+    }
+
+    return true;
+}
+
 void createScene()
 {
-    float positions[][3] = {
-        {1.f, 1.f, 0.f},
-        {-1.f, 1.f, 0.f},
-        {0.f, -1.f, 0.f}
-    };
-    uint32_t indices[] = { 0, 1, 2 };
-
-    createBufferVulkan(vk, { sizeof(positions),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        positions }, &app.scene.mesh.positions);
-
-    createBufferVulkan(vk, { sizeof(indices),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        indices }, &app.scene.mesh.indices);
-
-    app.scene.mesh.numVertices = 3;
-    app.scene.mesh.numFaces = 1;
+    bool res = loadGltfFile("data/test-sphere.gltf", &app.scene.mesh);
+    BASSERT(res);
 
     VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;

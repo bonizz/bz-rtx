@@ -26,6 +26,7 @@ project "test2"
         "../external/glfw/include",
         "../external/glm",
         "../external/volk",
+        "../external/tinygltf",
         "$(VULKAN_SDK)/Include",
         "src"
     }
