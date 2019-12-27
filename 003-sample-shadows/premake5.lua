@@ -1,8 +1,8 @@
-workspace "test3"
+workspace "sample-shadows"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test3"
+project "sample-shadows"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
