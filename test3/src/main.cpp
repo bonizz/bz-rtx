@@ -33,12 +33,29 @@ struct CameraUniformData
     glm::mat4 projInverse;
 };
 
+struct SceneNode
+{
+    std::string name;
+    int mesh;
+
+    glm::vec3 translation;
+    glm::vec3 scale;
+    glm::quat rotation;
+
+    bool matrixValid;
+    glm::mat4 matrix;
+
+    std::vector<int> children;
+};
+
 struct Scene
 {
     std::vector<Mesh> meshes;
 
     std::vector<VkDescriptorBufferInfo> normalsBufferInfos;
     std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
+
+    std::vector<SceneNode> nodes;
 
     Camera camera;
     BufferVulkan cameraBuffer;
@@ -265,8 +282,73 @@ bool loadGltfFile(const char* fn, Scene* pScene)
 
     pScene->meshes.resize(meshCount);
 
-    for (size_t meshIndex = 0; meshIndex < model.meshes.size(); meshIndex++)
-        loadGltfMesh(model, model.meshes[meshIndex], &pScene->meshes[meshIndex]);
+    for (size_t i = 0; i < model.meshes.size(); i++)
+        loadGltfMesh(model, model.meshes[i], &pScene->meshes[i]);
+
+    pScene->nodes.resize(model.nodes.size());
+
+    for (size_t i = 0; i < model.nodes.size(); i++)
+    {
+        auto& srcNode = model.nodes[i];
+        SceneNode& dstNode = pScene->nodes[i];
+
+        dstNode.name = srcNode.name;
+        dstNode.mesh = srcNode.mesh;
+        dstNode.children = srcNode.children;
+
+        if (srcNode.translation.size() > 0)
+        {
+            dstNode.translation = glm::vec3(
+                (float)srcNode.translation[0],
+                (float)srcNode.translation[1],
+                (float)srcNode.translation[2]
+            );
+        }
+        else
+        {
+            dstNode.translation = glm::vec3(0.f, 0.f, 0.f);
+        }
+
+        if (srcNode.scale.size() > 0)
+        {
+            dstNode.scale = glm::vec3(
+                (float)srcNode.scale[0],
+                (float)srcNode.scale[1],
+                (float)srcNode.scale[2]
+            );
+        }
+        else
+        {
+            dstNode.scale = glm::vec3(1.f, 1.f, 1.f);
+        }
+
+        if (srcNode.rotation.size() > 0)
+        {
+            // glm uses w, x, y, z
+            dstNode.rotation = glm::quat(
+                (float)srcNode.rotation[3],
+                (float)srcNode.rotation[0],
+                (float)srcNode.rotation[1],
+                (float)srcNode.rotation[2]
+            );
+        }
+        else
+        {
+            dstNode.rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
+        }
+
+        if (srcNode.matrix.size() > 0)
+        {
+            dstNode.matrixValid = true;
+            memcpy(glm::value_ptr(dstNode.matrix), srcNode.matrix.data(),
+                sizeof(float) * 16);
+        }
+        else
+        {
+            dstNode.matrixValid = false;
+            dstNode.matrix = glm::mat4(1.f);
+        }
+    }
 
     return true;
 }
@@ -277,19 +359,15 @@ void createScene()
     bool res = loadGltfFile("../data/shadow-test1.gltf", &app.scene);
     BASSERT(res);
 
+    // BONI TODO: this doesn't handle child nodes
     size_t meshCount = app.scene.meshes.size();
+    size_t nodesCount = app.scene.nodes.size();
 
-    std::vector<VkGeometryNV> geometries(meshCount);
+    std::vector<VkGeometryNV> geometries(meshCount); // needs to exist when blas is built
     std::vector<VkGeometryInstance> instances(meshCount);
 
     app.scene.normalsBufferInfos.resize(meshCount);
-    app.scene.indicesBufferInfos.resize(meshCount);
-
-    const float transform[12] = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-    };
+    app.scene.indicesBufferInfos.resize(nodesCount);
 
     for (size_t i = 0; i < meshCount; i++)
     {
@@ -316,6 +394,35 @@ void createScene()
         createAccelerationStructureVulkan(vk, {
             VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV,
             1, 0, &geometry }, &mesh.blas);
+    }
+
+    for (size_t i = 0; i < nodesCount; i++)
+    {
+        SceneNode& node = app.scene.nodes[i];
+
+        // BONI TODO: handle child nodes
+        BASSERT(node.children.size() == 0);
+
+        Mesh& mesh = app.scene.meshes[node.mesh];
+
+        glm::mat4 TRS;
+
+        if (node.matrixValid)
+        {
+            TRS = node.matrix;
+        }
+        else
+        {
+            glm::mat4 T = glm::translate(glm::mat4(1.f), node.translation);
+            glm::mat4 R = glm::toMat4(node.rotation);
+            glm::mat4 S = glm::scale(glm::mat4(1.f), node.scale);
+            TRS = T * R * S;
+        }
+
+        TRS = glm::transpose(TRS);
+
+        float transform[12] = {};
+        memcpy(transform, glm::value_ptr(TRS), sizeof(transform));
 
         VkGeometryInstance& instance = instances[i];
         memcpy(instance.transform, transform, sizeof(transform));
@@ -391,9 +498,6 @@ void createScene()
 
     for (auto& mesh : app.scene.meshes)
     {
-        //app.scene.mesh.blas.accelerationStructureInfo.instanceCount = 0;
-        //app.scene.mesh.blas.accelerationStructureInfo.geometryCount = 1;
-        //app.scene.mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
         vkCmdBuildAccelerationStructureNV(cmdBuffer, &mesh.blas.accelerationStructureInfo,
             VK_NULL_HANDLE, 0, VK_FALSE, mesh.blas.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
@@ -404,9 +508,6 @@ void createScene()
             0, 1, &memoryBarrier, 0, 0, 0, 0);
     }
 
-    //app.scene.topLevelStruct.accelerationStructureInfo.instanceCount = 1;
-    //app.scene.topLevelStruct.accelerationStructureInfo.geometryCount = 0;
-    //app.scene.topLevelStruct.accelerationStructureInfo.pGeometries = nullptr;
     vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.topLevelStruct.accelerationStructureInfo,
             app.instancesBuffer.buffer, 0, VK_FALSE, app.scene.topLevelStruct.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
