@@ -23,6 +23,12 @@ void cameraRotate(Camera& camera, const float angleX, const float angleY)
     camera.forward = glm::normalize(glm::rotate(combined, camera.forward));
 }
 
+void cameraRotate(Camera& camera, const glm::quat& rotation)
+{
+    //camera.up = glm::rotate(rotation, camera.up);
+    camera.forward = glm::rotate(rotation, camera.forward);
+}
+
 void cameraUpdateProjection(Camera& camera)
 {
     float left = camera.viewport[0];

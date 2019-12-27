@@ -281,6 +281,12 @@ bool loadGltfFile(const char* fn, Scene* pScene)
         return false;
     }
 
+    if (model.scenes.size() == 0)
+    {
+        DebugPrint("Error: no scene found in %s\n", fn);
+        return false;
+    }
+
     size_t meshCount = model.meshes.size();
     BASSERT(meshCount > 0);
 
@@ -289,15 +295,60 @@ bool loadGltfFile(const char* fn, Scene* pScene)
     for (size_t i = 0; i < model.meshes.size(); i++)
         loadGltfMesh(model, model.meshes[i], &pScene->meshes[i]);
 
-    pScene->nodes.reserve(model.nodes.size());
+    BASSERT(model.defaultScene == 0);
+    tinygltf::Scene& gltfScene = model.scenes[model.defaultScene];
 
-    for (size_t i = 0; i < model.nodes.size(); i++)
+    pScene->nodes.reserve(gltfScene.nodes.size());
+
+    auto readVec3 = [](auto& src, auto* dst, const glm::vec3& defaultValue) {
+        if (src.size() > 0) {
+            *dst = glm::vec3((float)src[0], (float)src[1], (float)src[2]);
+            return true;
+        } else {
+            *dst = defaultValue;
+            return false;
+        }
+    };
+
+    auto readQuat = [](auto& src, auto* dst, const glm::quat& defaultValue=glm::quat(1.f, 0.f, 0.f, 0.f)) {
+        // glm uses w, x, y, z
+        if (src.size() > 0) {
+            *dst = glm::quat((float)src[3], (float)src[0], (float)src[1], (float)src[2]);
+            return true;
+        } else {
+            *dst = defaultValue;
+            return false;
+        }
+    };
+
+    for (auto i : gltfScene.nodes)
     {
         auto& srcNode = model.nodes[i];
 
         if (srcNode.mesh == -1)
         {
-            // might be a light or camera.  skip for now
+            // might be a light or camera.
+
+            if (srcNode.children.size())
+            {
+                auto& childNode = model.nodes[srcNode.children[0]];
+                if (childNode.camera >= 0)
+                {
+                    readVec3(srcNode.translation, &pScene->camera.position, glm::vec3(0.f));
+
+                    glm::quat rot1, rot2;
+                    if (readQuat(srcNode.rotation, &rot1))
+                    {
+                        if (readQuat(childNode.rotation, &rot2))
+                        {
+                            cameraRotate(pScene->camera, rot1 * rot2);
+                        }
+                    }
+
+                    cameraUpdateView(pScene->camera);
+                }
+            }
+
             continue;
         }
 
@@ -308,46 +359,9 @@ bool loadGltfFile(const char* fn, Scene* pScene)
         dstNode.mesh = srcNode.mesh;
         dstNode.children = srcNode.children;
 
-        if (srcNode.translation.size() > 0)
-        {
-            dstNode.translation = glm::vec3(
-                (float)srcNode.translation[0],
-                (float)srcNode.translation[1],
-                (float)srcNode.translation[2]
-            );
-        }
-        else
-        {
-            dstNode.translation = glm::vec3(0.f, 0.f, 0.f);
-        }
-
-        if (srcNode.scale.size() > 0)
-        {
-            dstNode.scale = glm::vec3(
-                (float)srcNode.scale[0],
-                (float)srcNode.scale[1],
-                (float)srcNode.scale[2]
-            );
-        }
-        else
-        {
-            dstNode.scale = glm::vec3(1.f, 1.f, 1.f);
-        }
-
-        if (srcNode.rotation.size() > 0)
-        {
-            // glm uses w, x, y, z
-            dstNode.rotation = glm::quat(
-                (float)srcNode.rotation[3],
-                (float)srcNode.rotation[0],
-                (float)srcNode.rotation[1],
-                (float)srcNode.rotation[2]
-            );
-        }
-        else
-        {
-            dstNode.rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
-        }
+        readVec3(srcNode.translation, &dstNode.translation, glm::vec3(0.f));
+        readVec3(srcNode.scale, &dstNode.scale, glm::vec3(1.f));
+        readQuat(srcNode.rotation, &dstNode.rotation);
 
         if (srcNode.matrix.size() > 0)
         {
@@ -544,7 +558,7 @@ void createScene()
     destroyBufferVulkan(vk, scratchBuffer);
 }
 
-void setupCamera()
+void setupDefaultCamera()
 {
     createBufferVulkan(vk, { sizeof(CameraUniformData),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
@@ -1036,9 +1050,9 @@ int main()
         return 1;
     }
 
-    createScene();
+    setupDefaultCamera();
 
-    setupCamera();
+    createScene();
 
     createDescriptorSetLayouts();
     createRaytracingPipeline();

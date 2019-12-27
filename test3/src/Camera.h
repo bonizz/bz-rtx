@@ -10,13 +10,13 @@ struct Camera
     glm::vec3 position;
     glm::vec3 up;
     glm::vec3 forward;
-    glm::quat rotation;
     glm::mat4 projection;
     glm::mat4 view;
 };
 
 void cameraMove(Camera& camera, const glm::vec3& value);
 void cameraRotate(Camera& camera, const float angleX, const float angleY);
+void cameraRotate(Camera& camera, const glm::quat& rotation);
 void cameraUpdateProjection(Camera& camera);
 void cameraUpdateView(Camera& camera);
 
