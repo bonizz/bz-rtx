@@ -9,5 +9,5 @@ layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 void main()
 {
     const vec3 backgroundColor = vec3(0., 1., 0.);
-    PrimaryRay.color = backgroundColor;
+    PrimaryRay.color_distance = vec4(backgroundColor, -1.0);
 }

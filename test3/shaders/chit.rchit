@@ -29,10 +29,6 @@ void main()
 
     vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
 
-    // vec3 p0 = Positions.p[ind.x];
-    // vec3 p1 = Positions.p[ind.y];
-    // vec3 p2 = Positions.p[ind.z];
-
     vec3 n0 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.x].xyz;
     vec3 n1 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.y].xyz;
     vec3 n2 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.z].xyz;
@@ -43,17 +39,8 @@ void main()
 
     float ndotl = max(0., dot(N, L));
 
-    // PrimaryRay.color = p0;
-    PrimaryRay.color = barycentrics;
+    vec3 color = vec3(ndotl + 0.1);
 
-    // PrimaryRay.color = normal;
-
-    PrimaryRay.color = vec3(ndotl + 0.1);
-
-    // PrimaryRay.color = N;
-
-
-    // PrimaryRay.color = vec3(0., 0., 1.);
+    PrimaryRay.color_distance = vec4(color, gl_HitTNV);
 }
-
 

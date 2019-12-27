@@ -71,7 +71,9 @@ struct App
 
     VkShaderModule raygenShader;
     VkShaderModule chitShader;
+    VkShaderModule shadowChitShader;
     VkShaderModule missShader;
+    VkShaderModule shadowMissShader;
 
     BufferVulkan instancesBuffer;
     BufferVulkan sbtBuffer;
@@ -148,7 +150,9 @@ void shutdownApp()
 
     vkDestroyShaderModule(vk.device, app.raygenShader, nullptr);
     vkDestroyShaderModule(vk.device, app.chitShader, nullptr);
+    vkDestroyShaderModule(vk.device, app.shadowChitShader, nullptr);
     vkDestroyShaderModule(vk.device, app.missShader, nullptr);
+    vkDestroyShaderModule(vk.device, app.shadowMissShader, nullptr);
 
     vkDestroyDescriptorPool(vk.device, app.descriptorPool, nullptr);
 
@@ -285,12 +289,20 @@ bool loadGltfFile(const char* fn, Scene* pScene)
     for (size_t i = 0; i < model.meshes.size(); i++)
         loadGltfMesh(model, model.meshes[i], &pScene->meshes[i]);
 
-    pScene->nodes.resize(model.nodes.size());
+    pScene->nodes.reserve(model.nodes.size());
 
     for (size_t i = 0; i < model.nodes.size(); i++)
     {
         auto& srcNode = model.nodes[i];
-        SceneNode& dstNode = pScene->nodes[i];
+
+        if (srcNode.mesh == -1)
+        {
+            // might be a light or camera.  skip for now
+            continue;
+        }
+
+        pScene->nodes.push_back({});
+        SceneNode& dstNode = pScene->nodes.back();
 
         dstNode.name = srcNode.name;
         dstNode.mesh = srcNode.mesh;
@@ -355,8 +367,7 @@ bool loadGltfFile(const char* fn, Scene* pScene)
 
 void createScene()
 {
-    //bool res = loadGltfFile("../data/icosphere-2-subd.gltf", &app.scene.mesh);
-    bool res = loadGltfFile("../data/shadow-test1.gltf", &app.scene);
+    bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -642,7 +653,9 @@ void createRaytracingPipeline()
 
     createShaderVulkan(vk, "shaders/raygen.rgen.spv", &app.raygenShader);
     createShaderVulkan(vk, "shaders/chit.rchit.spv", &app.chitShader);
+    createShaderVulkan(vk, "shaders/shadow-chit.rchit.spv", &app.shadowChitShader);
     createShaderVulkan(vk, "shaders/miss.rmiss.spv", &app.missShader);
+    createShaderVulkan(vk, "shaders/shadow-miss.rmiss.spv", &app.shadowMissShader);
 
     VkPipelineShaderStageCreateInfo raygenStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     raygenStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_NV;
@@ -654,10 +667,20 @@ void createRaytracingPipeline()
     chitStage.module = app.chitShader;
     chitStage.pName = "main";
 
+    VkPipelineShaderStageCreateInfo shadowChitStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    shadowChitStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+    shadowChitStage.module = app.shadowChitShader;
+    shadowChitStage.pName = "main";
+
     VkPipelineShaderStageCreateInfo missStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     missStage.stage = VK_SHADER_STAGE_MISS_BIT_NV;
     missStage.module = app.missShader;
     missStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shadowMissStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    shadowMissStage.stage = VK_SHADER_STAGE_MISS_BIT_NV;
+    shadowMissStage.module = app.shadowMissShader;
+    shadowMissStage.pName = "main";
 
     VkRayTracingShaderGroupCreateInfoNV raygenGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
     raygenGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
@@ -673,23 +696,41 @@ void createRaytracingPipeline()
     chitGroup.anyHitShader = VK_SHADER_UNUSED_NV;
     chitGroup.intersectionShader = VK_SHADER_UNUSED_NV;
 
+    VkRayTracingShaderGroupCreateInfoNV shadowChitGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
+    shadowChitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_NV;
+    shadowChitGroup.generalShader = VK_SHADER_UNUSED_NV;
+    shadowChitGroup.closestHitShader = 2;
+    shadowChitGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    shadowChitGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+
     VkRayTracingShaderGroupCreateInfoNV missGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
     missGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
-    missGroup.generalShader = 2;
+    missGroup.generalShader = 3;
     missGroup.closestHitShader = VK_SHADER_UNUSED_NV;
     missGroup.anyHitShader = VK_SHADER_UNUSED_NV;
     missGroup.intersectionShader = VK_SHADER_UNUSED_NV;
 
+    VkRayTracingShaderGroupCreateInfoNV shadowMissGroup = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV };
+    shadowMissGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+    shadowMissGroup.generalShader = 4;
+    shadowMissGroup.closestHitShader = VK_SHADER_UNUSED_NV;
+    shadowMissGroup.anyHitShader = VK_SHADER_UNUSED_NV;
+    shadowMissGroup.intersectionShader = VK_SHADER_UNUSED_NV;
+
     VkPipelineShaderStageCreateInfo stages[] = {
         raygenStage,
         chitStage,
-        missStage
+        shadowChitStage,
+        missStage,
+        shadowMissStage
     };
 
     VkRayTracingShaderGroupCreateInfoNV groups[] = {
         raygenGroup,
         chitGroup,
-        missGroup
+        shadowChitGroup,
+        missGroup,
+        shadowMissGroup
     };
 
     VkRayTracingPipelineCreateInfoNV rayPipelineInfo = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_NV };
@@ -697,7 +738,7 @@ void createRaytracingPipeline()
     rayPipelineInfo.pStages = stages;
     rayPipelineInfo.groupCount = (uint32_t)std::size(groups);
     rayPipelineInfo.pGroups = groups;
-    rayPipelineInfo.maxRecursionDepth = 1;
+    rayPipelineInfo.maxRecursionDepth = 1; // no recursion needed now
     rayPipelineInfo.layout = app.pipelineLayout;
 
     VK_CHECK(vkCreateRayTracingPipelinesNV(vk.device, VK_NULL_HANDLE, 1, &rayPipelineInfo, nullptr, &app.rtPipeline));
@@ -705,7 +746,9 @@ void createRaytracingPipeline()
 
 void createShaderBindingTable()
 {
-    uint32_t sbtSize = vk.rtProps.shaderGroupHandleSize * 3;
+    int numGroups = 1 + 2 + 2; // raygen, 2 hit, 2 miss
+
+    uint32_t sbtSize = vk.rtProps.shaderGroupHandleSize * numGroups;
 
     createBufferVulkan(vk, { sbtSize,
         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
@@ -714,7 +757,6 @@ void createShaderBindingTable()
     // Put shader group handles in SBT memory
     std::vector<char> tmp(app.sbtBuffer.size);
 
-    int numGroups = 3; // raygen, 1 hit, 1 miss
     VK_CHECK(vkGetRayTracingShaderGroupHandlesNV(vk.device, app.rtPipeline, 0, numGroups, app.sbtBuffer.size, tmp.data()));
 
     void* sbtBufferMemory = nullptr;
@@ -876,13 +918,16 @@ void fillCommandBuffers()
 
             uint32_t stride = vk.rtProps.shaderGroupHandleSize;
 
+            uint32_t hitOffset = stride * 1;  // directly after raygen
+            uint32_t missOffset = stride * 3; // after raygen and 2 hit groups
+
             vkCmdTraceRaysNV(cmdBuffer,
                 // raygen
                 app.sbtBuffer.buffer, 0,
                 // miss
-                app.sbtBuffer.buffer, stride * 2, stride,
+                app.sbtBuffer.buffer, missOffset, stride,
                 // hit
-                app.sbtBuffer.buffer, stride * 1, stride,
+                app.sbtBuffer.buffer, hitOffset, stride,
                 // callable
                 VK_NULL_HANDLE, 0, 0,
                 kWindowWidth, kWindowHeight, 1);

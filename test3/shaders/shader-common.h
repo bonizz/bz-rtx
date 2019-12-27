@@ -8,5 +8,13 @@ struct UniformParams
 
 struct RayPayload
 {
-    vec3 color;
+    vec4 color_distance;
+    vec4 normal;
 };
+
+struct ShadowRayPayload
+{
+    float distance;
+};
+
+

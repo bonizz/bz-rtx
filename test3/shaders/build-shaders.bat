@@ -2,7 +2,9 @@
 
 call :build raygen.rgen
 call :build chit.rchit
+call :build shadow-chit.rchit
 call :build miss.rmiss
+call :build shadow-miss.rmiss
 
 goto :eof
 
