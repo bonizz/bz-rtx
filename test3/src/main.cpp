@@ -17,8 +17,8 @@ struct VkGeometryInstance
 
 struct Mesh
 {
-    uint32_t numVertices;
-    uint32_t numFaces;
+    uint32_t vertexCount;
+    uint32_t indexCount;
 
     BufferVulkan positions;
     BufferVulkan normals;
@@ -35,12 +35,15 @@ struct CameraUniformData
 
 struct Scene
 {
-    Mesh mesh;
+    std::vector<Mesh> meshes;
+
+    std::vector<VkDescriptorBufferInfo> normalsBufferInfos;
+    std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
 
     Camera camera;
     BufferVulkan cameraBuffer;
 
-    AccelerationStructureVulkan tlas;
+    AccelerationStructureVulkan topLevelStruct;
 };
 
 struct App
@@ -59,9 +62,9 @@ struct App
     VkPipelineLayout pipelineLayout;
     VkPipeline rtPipeline;
 
-    VkDescriptorSetLayout descriptorSetLayout;
     VkDescriptorPool descriptorPool;
-    VkDescriptorSet descriptorSet;
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
+    std::vector<VkDescriptorSet> descriptorSets;
 
     bool keysDown[GLFW_KEY_LAST + 1];
     bool mouseDown[GLFW_MOUSE_BUTTON_LAST + 1];
@@ -114,14 +117,17 @@ void shutdownApp()
     destroyBufferVulkan(vk, app.scene.cameraBuffer);
 
     {
-        destroyBufferVulkan(vk, app.scene.mesh.positions);
-        destroyBufferVulkan(vk, app.scene.mesh.normals);
-        destroyBufferVulkan(vk, app.scene.mesh.indices);
+        for (auto& mesh : app.scene.meshes)
+        {
+            destroyBufferVulkan(vk, mesh.positions);
+            destroyBufferVulkan(vk, mesh.normals);
+            destroyBufferVulkan(vk, mesh.indices);
 
-        destroyAccelerationStructure(vk, app.scene.mesh.blas);
+            destroyAccelerationStructure(vk, mesh.blas);
+        }
     }
 
-    destroyAccelerationStructure(vk, app.scene.tlas);
+    destroyAccelerationStructure(vk, app.scene.topLevelStruct);
 
     vkDestroyShaderModule(vk.device, app.raygenShader, nullptr);
     vkDestroyShaderModule(vk.device, app.chitShader, nullptr);
@@ -134,7 +140,8 @@ void shutdownApp()
     vkDestroyPipeline(vk.device, app.rtPipeline, nullptr);
     vkDestroyPipelineLayout(vk.device, app.pipelineLayout, nullptr);
 
-    vkDestroyDescriptorSetLayout(vk.device, app.descriptorSetLayout, nullptr);
+    for (auto& dsl : app.descriptorSetLayouts)
+        vkDestroyDescriptorSetLayout(vk.device, dsl, nullptr);
 
     destroyBufferVulkan(vk, app.instancesBuffer);
     destroyImageVulkan(vk, app.offscreenImage);
@@ -145,7 +152,99 @@ void shutdownApp()
     glfwTerminate();
 }
 
-bool loadGltfFile(const char* fn, Mesh* pMesh)
+void loadGltfMesh(tinygltf::Model& gltfModel, tinygltf::Mesh& gltfMesh, Mesh* pMesh)
+{
+    // Only handle single triangle primitives (for now).
+    BASSERT(gltfMesh.primitives.size() == 1);
+
+    auto& primitive = gltfMesh.primitives[0];
+
+    BASSERT(primitive.mode == TINYGLTF_MODE_TRIANGLES);
+
+    auto& attrs = primitive.attributes;
+
+    int idPosition = attrs.count("POSITION") == 1 ? attrs["POSITION"] : -1;
+    int idNormal = attrs.count("NORMAL") == 1 ? attrs["NORMAL"] : -1;
+    int idTexcoord0 = attrs.count("TEXCOORD_0") == 1 ? attrs["TEXCOORD_0"] : -1;
+    int idIndices = primitive.indices;
+
+    BASSERT(idPosition >= 0);
+
+    // Load positions
+    {
+        BASSERT(gltfModel.accessors[idPosition].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
+            && gltfModel.accessors[idPosition].type == TINYGLTF_TYPE_VEC3);
+
+        pMesh->vertexCount = (uint32_t)gltfModel.accessors[idPosition].count;
+
+        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idPosition].bufferView];
+
+        //std::vector<glm::vec3> dbgPositions(bv.byteLength / 12);
+        //memcpy(dbgPositions.data(),
+        //    &gltfModel.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
+
+        createBufferVulkan(vk, { bv.byteLength,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
+            &pMesh->positions);
+    }
+
+    // Load normals
+    {
+        BASSERT(idNormal >= 0);
+
+        BASSERT(gltfModel.accessors[idNormal].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
+            && gltfModel.accessors[idNormal].type == TINYGLTF_TYPE_VEC3);
+
+        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idNormal].bufferView];
+
+        std::vector<glm::vec3> vec3Normals(gltfModel.accessors[idNormal].count);
+        BASSERT(vec3Normals.size() * sizeof(glm::vec3) == bv.byteLength);
+        memcpy(vec3Normals.data(), &gltfModel.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
+
+        // Convert to vec4 for padding when accessed in shader
+        std::vector<glm::vec4> vec4Normals;
+        vec4Normals.reserve(gltfModel.accessors[idNormal].count);
+        for (const auto& n : vec3Normals)
+            vec4Normals.emplace_back(n.x, n.y, n.z, 0.f);
+
+        createBufferVulkan(vk, { vec4Normals.size() * sizeof(glm::vec4),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            vec4Normals.data() },
+            &pMesh->normals);
+    }
+
+    // Load indices
+    {
+        BASSERT(gltfModel.accessors[idIndices].componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT
+            && gltfModel.accessors[idIndices].type == TINYGLTF_TYPE_SCALAR);
+
+        uint32_t indexCount = (uint32_t)gltfModel.accessors[idIndices].count;
+        pMesh->indexCount = indexCount;
+
+        std::vector<uint16_t> indices16(indexCount);
+
+        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idIndices].bufferView];
+
+        memcpy(indices16.data(), &gltfModel.buffers[bv.buffer].data[bv.byteOffset],
+            bv.byteLength);
+
+        std::vector<uint32_t> indices32(indexCount);
+        for (size_t i = 0; i < indexCount; i++)
+            indices32[i] = indices16[i];
+
+        createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            indices32.data() }, &pMesh->indices);
+    }
+}
+
+bool loadGltfFile(const char* fn, Scene* pScene)
 {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -161,121 +260,30 @@ bool loadGltfFile(const char* fn, Mesh* pMesh)
         return false;
     }
 
-    BASSERT(model.meshes.size() > 0);
+    size_t meshCount = model.meshes.size();
+    BASSERT(meshCount > 0);
 
-    // BONI TEMP: Only handle 1 mesh for now
-    BASSERT(model.meshes.size() == 1);
+    pScene->meshes.resize(meshCount);
 
-    auto& primitives = model.meshes[0].primitives;
-
-    BASSERT(primitives.size() > 0);
-
-    // BONI TEMP: Only handle 1 triangles primitive for now
-    BASSERT(primitives.size() == 1);
-    BASSERT(primitives[0].mode == TINYGLTF_MODE_TRIANGLES);
-
-    auto& attrs = primitives[0].attributes;
-
-    int idPosition = attrs.count("POSITION") == 1 ? attrs["POSITION"] : -1;
-    int idNormal = attrs.count("NORMAL") == 1 ? attrs["NORMAL"] : -1;
-    int idTexcoord0 = attrs.count("TEXCOORD_0") == 1 ? attrs["TEXCOORD_0"] : -1;
-    int idIndices = primitives[0].indices;
-
-    {
-        BASSERT(idPosition >= 0);
-
-        BASSERT(model.accessors[idPosition].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
-            && model.accessors[idPosition].type == TINYGLTF_TYPE_VEC3);
-
-        pMesh->numVertices = (uint32_t)model.accessors[idPosition].count;
-
-        auto& bv = model.bufferViews[model.accessors[idPosition].bufferView];
-
-        std::vector<glm::vec3> dbgPositions(bv.byteLength / 12);
-        memcpy(dbgPositions.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
-
-        createBufferVulkan(vk, { bv.byteLength,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &model.buffers[bv.buffer].data[bv.byteOffset] },
-            &app.scene.mesh.positions);
-    }
-
-    {
-        BASSERT(idNormal >= 0);
-
-        BASSERT(model.accessors[idNormal].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
-            && model.accessors[idNormal].type == TINYGLTF_TYPE_VEC3);
-
-        auto& bv = model.bufferViews[model.accessors[idNormal].bufferView];
-
-        std::vector<glm::vec3> vec3Normals(model.accessors[idNormal].count);
-        BASSERT(vec3Normals.size() * sizeof(glm::vec3) == bv.byteLength);
-        memcpy(vec3Normals.data(), &model.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
-
-        // Convert to vec4 for padding when accessed in shader
-        std::vector<glm::vec4> vec4Normals;
-        vec4Normals.reserve(model.accessors[idNormal].count);
-        for (const auto& n : vec3Normals)
-            vec4Normals.emplace_back(n.x, n.y, n.z, 0.f);
-
-        createBufferVulkan(vk, { vec4Normals.size() * sizeof(glm::vec4),
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            vec4Normals.data() },
-            &app.scene.mesh.normals);
-    }
-
-    {
-        BASSERT(model.accessors[idIndices].componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT
-            && model.accessors[idIndices].type == TINYGLTF_TYPE_SCALAR);
-
-        int indexCount = (uint32_t)model.accessors[idIndices].count;
-        pMesh->numFaces = (uint32_t)(model.accessors[idIndices].count / 3);
-
-        std::vector<uint16_t> indices16(indexCount);
-
-        auto& bv = model.bufferViews[model.accessors[idIndices].bufferView];
-
-        memcpy(indices16.data(), &model.buffers[bv.buffer].data[bv.byteOffset],
-            bv.byteLength);
-
-        std::vector<uint32_t> indices32(indexCount);
-        for (int i = 0; i < indexCount; i++)
-            indices32[i] = indices16[i];
-
-        createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            indices32.data() }, &app.scene.mesh.indices);
-    }
+    for (size_t meshIndex = 0; meshIndex < model.meshes.size(); meshIndex++)
+        loadGltfMesh(model, model.meshes[meshIndex], &pScene->meshes[meshIndex]);
 
     return true;
 }
 
 void createScene()
 {
-    bool res = loadGltfFile("../data/icosphere-4-subd.gltf", &app.scene.mesh);
+    //bool res = loadGltfFile("../data/icosphere-2-subd.gltf", &app.scene.mesh);
+    bool res = loadGltfFile("../data/shadow-test1.gltf", &app.scene);
     BASSERT(res);
 
-    VkGeometryNV geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
-    geometry.geometry.triangles = { VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV };
-    geometry.geometry.triangles.vertexData = app.scene.mesh.positions.buffer;
-    geometry.geometry.triangles.vertexOffset = 0;
-    geometry.geometry.triangles.vertexCount = app.scene.mesh.numVertices;
-    geometry.geometry.triangles.vertexStride = sizeof(float) * 3;
-    geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geometry.geometry.triangles.indexData = app.scene.mesh.indices.buffer;
-    geometry.geometry.triangles.indexOffset = 0;
-    geometry.geometry.triangles.indexCount = app.scene.mesh.numFaces * 3;
-    geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32; // BONI TODO: switch to uint16
-    geometry.geometry.triangles.transformData = VK_NULL_HANDLE;
-    geometry.geometry.triangles.transformOffset = 0;
-    geometry.geometry.aabbs = { VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV };
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_NV;
+    size_t meshCount = app.scene.meshes.size();
+
+    std::vector<VkGeometryNV> geometries(meshCount);
+    std::vector<VkGeometryInstance> instances(meshCount);
+
+    app.scene.normalsBufferInfos.resize(meshCount);
+    app.scene.indicesBufferInfos.resize(meshCount);
 
     const float transform[12] = {
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -283,52 +291,87 @@ void createScene()
         0.0f, 0.0f, 1.0f, 0.0f,
     };
 
-    createAccelerationStructureVulkan(vk, {
-        VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV,
-        1, 0, &geometry }, &app.scene.mesh.blas);
+    for (size_t i = 0; i < meshCount; i++)
+    {
+        Mesh& mesh = app.scene.meshes[i];
+        VkGeometryNV& geometry = geometries[i];
 
-    VkGeometryInstance instance;
-    memcpy(instance.transform, transform, sizeof(transform));
-    instance.instanceId = 0;
-    instance.mask = 0xFF;
-    instance.instanceOffset = 0;
-    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
-    instance.accelerationStructureHandle = app.scene.mesh.blas.handle;
+        geometry = { VK_STRUCTURE_TYPE_GEOMETRY_NV };
+        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
+        geometry.geometry.triangles = { VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV };
+        geometry.geometry.triangles.vertexData = mesh.positions.buffer;
+        geometry.geometry.triangles.vertexOffset = 0;
+        geometry.geometry.triangles.vertexCount = mesh.vertexCount;
+        geometry.geometry.triangles.vertexStride = sizeof(float) * 3;
+        geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geometry.geometry.triangles.indexData = mesh.indices.buffer;
+        geometry.geometry.triangles.indexOffset = 0;
+        geometry.geometry.triangles.indexCount = mesh.indexCount;
+        geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32; // BONI TODO: switch to uint16
+        geometry.geometry.triangles.transformData = VK_NULL_HANDLE;
+        geometry.geometry.triangles.transformOffset = 0;
+        geometry.geometry.aabbs = { VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV };
+        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_NV;
 
-    createBufferVulkan(vk, { sizeof(VkGeometryInstance),
+        createAccelerationStructureVulkan(vk, {
+            VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV,
+            1, 0, &geometry }, &mesh.blas);
+
+        VkGeometryInstance& instance = instances[i];
+        memcpy(instance.transform, transform, sizeof(transform));
+        instance.instanceId = i;
+        instance.mask = 0xFF;
+        instance.instanceOffset = 0;
+        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
+        instance.accelerationStructureHandle = mesh.blas.handle;
+
+        VkDescriptorBufferInfo& normalsBufferInfo = app.scene.normalsBufferInfos[i];
+        normalsBufferInfo.buffer = mesh.normals.buffer;
+        normalsBufferInfo.offset = 0;
+        normalsBufferInfo.range = mesh.normals.size;
+
+        VkDescriptorBufferInfo& indicesBufferInfo = app.scene.indicesBufferInfos[i];
+        indicesBufferInfo.buffer = mesh.indices.buffer;
+        indicesBufferInfo.offset = 0;
+        indicesBufferInfo.range = mesh.indices.size;
+    }
+
+    createBufferVulkan(vk, { instances.size() * sizeof(VkGeometryInstance),
         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        &instance }, &app.instancesBuffer);
+        instances.data() }, &app.instancesBuffer);
 
     createAccelerationStructureVulkan(vk, {
         VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV,
-        0, 1, nullptr }, &app.scene.tlas);
+        0, (uint32_t)instances.size(), nullptr }, &app.scene.topLevelStruct);
 
-    // Build bottom/top AS
-    
     VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo = {};
     memoryRequirementsInfo.sType = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV };
     memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
 
-    VkDeviceSize maxBlasSize = 0;
-    memoryRequirementsInfo.accelerationStructure = app.scene.mesh.blas.accelerationStructure;
+    VkDeviceSize scratchBufferSize = 0;
 
-    VkMemoryRequirements2 memReqBlas;
-    vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memReqBlas);
+    for (auto& mesh : app.scene.meshes)
+    {
+        memoryRequirementsInfo.accelerationStructure = mesh.blas.accelerationStructure;
 
-    maxBlasSize = memReqBlas.memoryRequirements.size;
+        VkMemoryRequirements2 memReqBlas;
+        vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memReqBlas);
+
+        scratchBufferSize = std::max(scratchBufferSize, memReqBlas.memoryRequirements.size);
+    }
 
     VkMemoryRequirements2 memReqTlas;
-    memoryRequirementsInfo.accelerationStructure = app.scene.tlas.accelerationStructure;
+    memoryRequirementsInfo.accelerationStructure = app.scene.topLevelStruct.accelerationStructure;
     vkGetAccelerationStructureMemoryRequirementsNV(vk.device, &memoryRequirementsInfo, &memReqTlas);
 
-    VkDeviceSize scratchBufferSize = std::max(maxBlasSize, memReqTlas.memoryRequirements.size);
+    scratchBufferSize = std::max(scratchBufferSize, memReqTlas.memoryRequirements.size);
 
     BufferVulkan scratchBuffer;
 
     createBufferVulkan(vk, { scratchBufferSize,
-    VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &scratchBuffer);
+        VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &scratchBuffer);
 
     VkCommandBufferAllocateInfo commandBufferAllocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     commandBufferAllocateInfo.commandPool = vk.commandPool;
@@ -346,23 +389,26 @@ void createScene()
     memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
     memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
 
-    app.scene.mesh.blas.accelerationStructureInfo.instanceCount = 0;
-    app.scene.mesh.blas.accelerationStructureInfo.geometryCount = 1;
-    app.scene.mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
-    vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.mesh.blas.accelerationStructureInfo,
-            VK_NULL_HANDLE, 0, VK_FALSE, app.scene.mesh.blas.accelerationStructure,
+    for (auto& mesh : app.scene.meshes)
+    {
+        //app.scene.mesh.blas.accelerationStructureInfo.instanceCount = 0;
+        //app.scene.mesh.blas.accelerationStructureInfo.geometryCount = 1;
+        //app.scene.mesh.blas.accelerationStructureInfo.pGeometries = &geometry;
+        vkCmdBuildAccelerationStructureNV(cmdBuffer, &mesh.blas.accelerationStructureInfo,
+            VK_NULL_HANDLE, 0, VK_FALSE, mesh.blas.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
-    vkCmdPipelineBarrier(cmdBuffer,
+        vkCmdPipelineBarrier(cmdBuffer,
             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             0, 1, &memoryBarrier, 0, 0, 0, 0);
+    }
 
-    app.scene.tlas.accelerationStructureInfo.instanceCount = 1;
-    app.scene.tlas.accelerationStructureInfo.geometryCount = 0;
-    app.scene.tlas.accelerationStructureInfo.pGeometries = nullptr;
-    vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.tlas.accelerationStructureInfo,
-            app.instancesBuffer.buffer, 0, VK_FALSE, app.scene.tlas.accelerationStructure,
+    //app.scene.topLevelStruct.accelerationStructureInfo.instanceCount = 1;
+    //app.scene.topLevelStruct.accelerationStructureInfo.geometryCount = 0;
+    //app.scene.topLevelStruct.accelerationStructureInfo.pGeometries = nullptr;
+    vkCmdBuildAccelerationStructureNV(cmdBuffer, &app.scene.topLevelStruct.accelerationStructureInfo,
+            app.instancesBuffer.buffer, 0, VK_FALSE, app.scene.topLevelStruct.accelerationStructure,
             VK_NULL_HANDLE, scratchBuffer.buffer, 0);
 
     vkCmdPipelineBarrier(cmdBuffer,
@@ -405,13 +451,18 @@ void setupCamera()
 
 void createDescriptorSetLayouts()
 {
+    app.descriptorSetLayouts.resize(3);
+
     // Set 0:
     //   Binding 0 -> AS
     //   Binding 1 -> output image
     //   Binding 2 -> camera data
-    // --
-    //   Binding 3 -> normals (vec4)
-    //   Binding 4 -> indices (uint)
+
+    // Set 1: vec4 normalsArrays[]
+    //   Binding 0-N, where N = mesh count
+
+    // Set 2: uint indicesArrays[]
+    //   Binding 0-N, where N = mesh count
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
     asLayoutBinding.binding = 0;
@@ -431,40 +482,59 @@ void createDescriptorSetLayouts()
     cameraDataLayoutBinding.descriptorCount = 1;
     cameraDataLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
 
-    VkDescriptorSetLayoutBinding normalsLayoutBinding = {};
-    normalsLayoutBinding.binding = 3;
-    normalsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    normalsLayoutBinding.descriptorCount = 1;
-    normalsLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
-
-    VkDescriptorSetLayoutBinding indicesLayoutBinding = {};
-    indicesLayoutBinding.binding = 4;
-    indicesLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    indicesLayoutBinding.descriptorCount = 1;
-    indicesLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
-
-    VkDescriptorSetLayoutBinding bindings[] = {
+    VkDescriptorSetLayoutBinding set0Bindings[] = {
         asLayoutBinding,
         outputImageLayoutBinding,
-        cameraDataLayoutBinding,
-        normalsLayoutBinding,
-        indicesLayoutBinding
+        cameraDataLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo set0LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     set0LayoutInfo.flags = 0;
-    set0LayoutInfo.bindingCount = (uint32_t)std::size(bindings);
-    set0LayoutInfo.pBindings = bindings;
+    set0LayoutInfo.bindingCount = (uint32_t)std::size(set0Bindings);
+    set0LayoutInfo.pBindings = set0Bindings;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set0LayoutInfo, nullptr, &app.descriptorSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set0LayoutInfo, nullptr,
+        &app.descriptorSetLayouts[0]));
+
+    // Set 1: vec4 normalsArrays[]
+    //   Binding 0-N, where N = mesh count
+
+    const VkDescriptorBindingFlagsEXT flags = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT;
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags = {};
+    bindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    bindingFlags.pBindingFlags = &flags;
+    bindingFlags.bindingCount = 1;
+
+
+    VkDescriptorSetLayoutBinding storageBufferBinding = {};
+    storageBufferBinding.binding = 0;
+    storageBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    storageBufferBinding.descriptorCount = (uint32_t)app.scene.meshes.size();
+    storageBufferBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+    VkDescriptorSetLayoutCreateInfo set1LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    set1LayoutInfo.pNext = &bindingFlags;
+    set1LayoutInfo.flags = 0;
+    set1LayoutInfo.bindingCount = 1;
+    set1LayoutInfo.pBindings = &storageBufferBinding;
+
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
+        &app.descriptorSetLayouts[1]));
+
+    // Set 2: uint indicesArrays[]
+    //   Binding 0-N, where N = mesh count
+
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
+        &app.descriptorSetLayouts[2]));
 }
 
 void createRaytracingPipeline()
 {
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     pipelineLayoutCreateInfo.flags = 0;
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &app.descriptorSetLayout;
+    pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)app.descriptorSetLayouts.size();
+    pipelineLayoutCreateInfo.pSetLayouts = app.descriptorSetLayouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
 
     VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutCreateInfo, nullptr, &app.pipelineLayout));
@@ -554,39 +624,51 @@ void createShaderBindingTable()
 
 void createDescriptorSets()
 {
+    uint32_t meshCount = (uint32_t)app.scene.meshes.size();
+
+    app.descriptorSets.resize(app.descriptorSetLayouts.size());
+
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // camera data
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // normals
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // indices
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
     };
 
     VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     descPoolCreateInfo.poolSizeCount = (uint32_t)std::size(poolSizes);
     descPoolCreateInfo.pPoolSizes = poolSizes;
-    descPoolCreateInfo.maxSets = 1;
+    descPoolCreateInfo.maxSets = (uint32_t)app.descriptorSetLayouts.size();
 
     VK_CHECK(vkCreateDescriptorPool(vk.device, &descPoolCreateInfo, nullptr, &app.descriptorPool));
 
-    VkDescriptorSetLayout setLayouts[] = {
-        app.descriptorSetLayout
+    uint32_t variableDescriptorCounts[] = {
+        1,
+        meshCount, // normals
+        meshCount // indices
     };
 
-    VkDescriptorSetAllocateInfo descSetAllocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    descSetAllocInfo.descriptorPool = app.descriptorPool;
-    descSetAllocInfo.pSetLayouts = setLayouts;
-    descSetAllocInfo.descriptorSetCount = 1;
+    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountInfo = {};
+    variableDescriptorCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+    variableDescriptorCountInfo.descriptorSetCount = (uint32_t)std::size(variableDescriptorCounts);
+    variableDescriptorCountInfo.pDescriptorCounts = variableDescriptorCounts;
 
-    VK_CHECK(vkAllocateDescriptorSets(vk.device, &descSetAllocInfo, &app.descriptorSet));
+    VkDescriptorSetAllocateInfo descSetAllocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    descSetAllocInfo.pNext = &variableDescriptorCountInfo;
+    descSetAllocInfo.descriptorPool = app.descriptorPool;
+    descSetAllocInfo.descriptorSetCount = (uint32_t)app.descriptorSetLayouts.size();
+    descSetAllocInfo.pSetLayouts = app.descriptorSetLayouts.data();
+
+    VK_CHECK(vkAllocateDescriptorSets(vk.device, &descSetAllocInfo, app.descriptorSets.data()));
 
     VkWriteDescriptorSetAccelerationStructureNV descAccelStructInfo = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV };
     descAccelStructInfo.accelerationStructureCount = 1;
-    descAccelStructInfo.pAccelerationStructures = &app.scene.tlas.accelerationStructure;
+    descAccelStructInfo.pAccelerationStructures = &app.scene.topLevelStruct.accelerationStructure;
 
     VkWriteDescriptorSet accelStructWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     accelStructWrite.pNext = &descAccelStructInfo;
-    accelStructWrite.dstSet = app.descriptorSet;
+    accelStructWrite.dstSet = app.descriptorSets[0];
     accelStructWrite.dstBinding = 0;
     accelStructWrite.descriptorCount = 1;
     accelStructWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
@@ -599,7 +681,7 @@ void createDescriptorSets()
     descOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkWriteDescriptorSet resImageWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    resImageWrite.dstSet = app.descriptorSet;
+    resImageWrite.dstSet = app.descriptorSets[0];
     resImageWrite.dstBinding = 1;
     resImageWrite.descriptorCount = 1;
     resImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -613,7 +695,7 @@ void createDescriptorSets()
     camdataBufferInfo.range = app.scene.cameraBuffer.size;
 
     VkWriteDescriptorSet camdataBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    camdataBufferWrite.dstSet = app.descriptorSet;
+    camdataBufferWrite.dstSet = app.descriptorSets[0];
     camdataBufferWrite.dstBinding = 2;
     camdataBufferWrite.descriptorCount = 1;
     camdataBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -621,32 +703,22 @@ void createDescriptorSets()
     camdataBufferWrite.pBufferInfo = &camdataBufferInfo;
     camdataBufferWrite.pTexelBufferView = nullptr;
 
-    VkDescriptorBufferInfo normalsBufferInfo = {};
-    normalsBufferInfo.buffer = app.scene.mesh.normals.buffer;
-    normalsBufferInfo.offset = 0;
-    normalsBufferInfo.range = VK_WHOLE_SIZE;
-
     VkWriteDescriptorSet normalsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    normalsBufferWrite.dstSet = app.descriptorSet;
-    normalsBufferWrite.dstBinding = 3;
-    normalsBufferWrite.descriptorCount = 1;
+    normalsBufferWrite.dstSet = app.descriptorSets[1];
+    normalsBufferWrite.dstBinding = 0;
+    normalsBufferWrite.descriptorCount = meshCount;
     normalsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     normalsBufferWrite.pImageInfo = nullptr;
-    normalsBufferWrite.pBufferInfo = &normalsBufferInfo;
+    normalsBufferWrite.pBufferInfo = app.scene.normalsBufferInfos.data();
     normalsBufferWrite.pTexelBufferView = nullptr;
 
-    VkDescriptorBufferInfo indicesBufferInfo = {};
-    indicesBufferInfo.buffer = app.scene.mesh.indices.buffer;
-    indicesBufferInfo.offset = 0;
-    indicesBufferInfo.range = VK_WHOLE_SIZE;
-
     VkWriteDescriptorSet indicesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    indicesBufferWrite.dstSet = app.descriptorSet;
-    indicesBufferWrite.dstBinding = 4;
-    indicesBufferWrite.descriptorCount = 1;
+    indicesBufferWrite.dstSet = app.descriptorSets[2];
+    indicesBufferWrite.dstBinding = 0;
+    indicesBufferWrite.descriptorCount = meshCount;
     indicesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     indicesBufferWrite.pImageInfo = nullptr;
-    indicesBufferWrite.pBufferInfo = &indicesBufferInfo;
+    indicesBufferWrite.pBufferInfo = app.scene.indicesBufferInfos.data();
     indicesBufferWrite.pTexelBufferView = nullptr;
 
     VkWriteDescriptorSet descriptorWrites[] = {
@@ -698,7 +770,7 @@ void fillCommandBuffers()
             vkCmdBindDescriptorSets(cmdBuffer,
                 VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
                 app.pipelineLayout, 0,
-                1, &app.descriptorSet,
+                (uint32_t)app.descriptorSets.size(), app.descriptorSets.data(),
                 0, 0);
 
             uint32_t stride = vk.rtProps.shaderGroupHandleSize;

@@ -5,8 +5,8 @@
 
 #include "shader-common.h"
 
-layout(set = 0, binding = 3) readonly buffer NormalsBuffer { vec4 n[]; } Normals;
-layout(set = 0, binding = 4) readonly buffer IndicesBuffer { uint i[]; } Indices;
+layout(set = 1, binding = 0) readonly buffer NormalsBuffer { vec4 n[]; } Normals[];
+layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -22,9 +22,9 @@ vec3 interpolate(vec3 a, vec3 b, vec3 c, vec3 barycentrics)
 void main()
 {
     ivec3 ind = ivec3(
-        Indices.i[3 * gl_PrimitiveID],
-        Indices.i[3 * gl_PrimitiveID + 1],
-        Indices.i[3 * gl_PrimitiveID + 2]
+        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID],
+        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID + 1],
+        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID + 2]
     );
 
     vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
@@ -33,9 +33,9 @@ void main()
     // vec3 p1 = Positions.p[ind.y];
     // vec3 p2 = Positions.p[ind.z];
 
-    vec3 n0 = Normals.n[ind.x].xyz;
-    vec3 n1 = Normals.n[ind.y].xyz;
-    vec3 n2 = Normals.n[ind.z].xyz;
+    vec3 n0 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.x].xyz;
+    vec3 n1 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.y].xyz;
+    vec3 n2 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.z].xyz;
 
     vec3 N = normalize(interpolate(n0, n1, n2, barycentrics));
 

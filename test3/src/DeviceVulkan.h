@@ -19,7 +19,7 @@ struct BufferVulkanCreateInfo
     VkDeviceSize size;
     VkBufferUsageFlags usage;
     VkMemoryPropertyFlags memoryProperties;
-    void* pSrc;
+    const void* pSrc;
 };
 
 struct ImageVulkan
