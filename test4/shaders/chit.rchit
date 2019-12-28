@@ -5,7 +5,7 @@
 
 #include "shader-common.h"
 
-layout(set = 1, binding = 0) readonly buffer NormalsBuffer { vec4 n[]; } Normals[];
+layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
 layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
@@ -38,9 +38,21 @@ void main()
         Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2]
     );
 
-    vec3 n0 = Normals[gl_InstanceID].n[ind.x].xyz;
-    vec3 n1 = Normals[gl_InstanceID].n[ind.y].xyz;
-    vec3 n2 = Normals[gl_InstanceID].n[ind.z].xyz;
+    vec3 n0 = vec3(
+        Normals[gl_InstanceID].n[3*ind.x + 0],
+        Normals[gl_InstanceID].n[3*ind.x + 1],
+        Normals[gl_InstanceID].n[3*ind.x + 2]
+    );
+    vec3 n1 = vec3(
+        Normals[gl_InstanceID].n[3*ind.y + 0],
+        Normals[gl_InstanceID].n[3*ind.y + 1],
+        Normals[gl_InstanceID].n[3*ind.y + 2]
+    );
+    vec3 n2 = vec3(
+        Normals[gl_InstanceID].n[3*ind.z + 0],
+        Normals[gl_InstanceID].n[3*ind.z + 1],
+        Normals[gl_InstanceID].n[3*ind.z + 2]
+    );
 
     vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
 

@@ -222,20 +222,12 @@ void loadGltfMesh(tinygltf::Model& gltfModel, tinygltf::Mesh& gltfMesh, Mesh* pM
 
         auto& bv = gltfModel.bufferViews[gltfModel.accessors[idNormal].bufferView];
 
-        std::vector<glm::vec3> vec3Normals(gltfModel.accessors[idNormal].count);
-        BASSERT(vec3Normals.size() * sizeof(glm::vec3) == bv.byteLength);
-        memcpy(vec3Normals.data(), &gltfModel.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
+        auto normalCount = gltfModel.accessors[idNormal].count;
 
-        // Convert to vec4 for padding when accessed in shader
-        std::vector<glm::vec4> vec4Normals;
-        vec4Normals.reserve(gltfModel.accessors[idNormal].count);
-        for (const auto& n : vec3Normals)
-            vec4Normals.emplace_back(n.x, n.y, n.z, 0.f);
-
-        createBufferVulkan(vk, { vec4Normals.size() * sizeof(glm::vec4),
+        createBufferVulkan(vk, { bv.byteLength,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            vec4Normals.data() },
+            & gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
             &pMesh->normals);
     }
 
@@ -254,9 +246,7 @@ void loadGltfMesh(tinygltf::Model& gltfModel, tinygltf::Mesh& gltfMesh, Mesh* pM
         memcpy(indices16.data(), &gltfModel.buffers[bv.buffer].data[bv.byteOffset],
             bv.byteLength);
 
-        std::vector<uint32_t> indices32(indexCount);
-        for (size_t i = 0; i < indexCount; i++)
-            indices32[i] = indices16[i];
+        std::vector<uint32_t> indices32(indices16.begin(), indices16.end());
 
         createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
             VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
