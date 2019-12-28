@@ -382,9 +382,9 @@ bool loadGltfFile(const char* fn, Scene* pScene)
 
 void createScene()
 {
-    bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
+    //bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
     //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
-    //bool res = loadGltfFile("../data/misc-boxes.gltf", &app.scene);
+    bool res = loadGltfFile("../data/misc-boxes.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -454,7 +454,7 @@ void createScene()
 
         VkGeometryInstance& instance = instances[i];
         memcpy(instance.transform, transform, sizeof(transform));
-        instance.instanceCustomIndex = i;
+        instance.instanceCustomIndex = 0; // We can use gl_InstanceID if we're just using `i` here.
         instance.mask = 0xFF;
         instance.instanceOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
@@ -1026,7 +1026,10 @@ void updateCamera(const float dt)
     if (app.keysDown[GLFW_KEY_Q]) moveDelta.y -= 1.f;
     if (app.keysDown[GLFW_KEY_E]) moveDelta.y += 1.f;
 
-    moveDelta *= kCameraMoveSpeed * dt;
+    const bool shiftPressed = app.keysDown[GLFW_KEY_LEFT_SHIFT] || app.keysDown[GLFW_KEY_RIGHT_SHIFT];
+    const float shiftSpeed = shiftPressed ? 6.f : 0.f;
+
+    moveDelta *= (kCameraMoveSpeed + shiftSpeed) * dt;
     cameraMove(cam, moveDelta);
 
     cameraUpdateView(cam);

@@ -21,17 +21,28 @@ vec3 interpolate(vec3 a, vec3 b, vec3 c, vec3 barycentrics)
 
 void main()
 {
+    // BONI TODO: when do we _need_ to use nonuniformEXT ?
+    // ivec3 ind = ivec3(
+    //     Indices[nonuniformEXT(gl_InstanceID)].i[3 * gl_PrimitiveID],
+    //     Indices[nonuniformEXT(gl_InstanceID)].i[3 * gl_PrimitiveID + 1],
+    //     Indices[nonuniformEXT(gl_InstanceID)].i[3 * gl_PrimitiveID + 2]
+    // );
+
+    // vec3 n0 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.x].xyz;
+    // vec3 n1 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.y].xyz;
+    // vec3 n2 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.z].xyz;
+
     ivec3 ind = ivec3(
-        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID],
-        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID + 1],
-        Indices[nonuniformEXT(gl_InstanceCustomIndexNV)].i[3 * gl_PrimitiveID + 2]
+        Indices[gl_InstanceID].i[3 * gl_PrimitiveID],
+        Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 1],
+        Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2]
     );
 
-    vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
+    vec3 n0 = Normals[gl_InstanceID].n[ind.x].xyz;
+    vec3 n1 = Normals[gl_InstanceID].n[ind.y].xyz;
+    vec3 n2 = Normals[gl_InstanceID].n[ind.z].xyz;
 
-    vec3 n0 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.x].xyz;
-    vec3 n1 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.y].xyz;
-    vec3 n2 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.z].xyz;
+    vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
 
     // normalize before or after? or both?
     vec3 N = interpolate(n0, n1, n2, barycentrics);
