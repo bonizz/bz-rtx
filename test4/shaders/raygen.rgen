@@ -51,15 +51,16 @@ void main()
     );
 
     vec3 hitColor = PrimaryRay.color_distance.rgb;
-    vec3 hitNormal = PrimaryRay.normal.xyz;
     float hitDistance = PrimaryRay.color_distance.w;
 
     if (hitDistance >= 0.)
     {
         vec3 hitPos = originWS.xyz + directionWS.xyz * hitDistance;
 
+        vec3 hitNormal = PrimaryRay.normal.xyz;
+
         vec3 toLight = normalize(vec3(1., 1., 1.));
-        vec3 shadowRayOrigin = hitPos;// + hitNormal * 0.001;
+        vec3 shadowRayOrigin = hitPos;// + hitNormal * 0.01;
         uint shadowRayFlags = gl_RayFlagsOpaqueNV | gl_RayFlagsTerminateOnFirstHitNV;
 
         traceNV(Scene, shadowRayFlags, 0xFF,
@@ -67,7 +68,8 @@ void main()
              0, // stride ??
              1, // offset 1 (choose 2nd miss shader)
              shadowRayOrigin,
-             0.001, toLight, tmax,
+             2, // ?? adjusted for colored-sphere scene
+             toLight, tmax,
              1  // payload location 1
         );
 
@@ -76,7 +78,10 @@ void main()
             // In shadow
             hitColor *= 0.3;
         }
+
+        // hitColor = hitNormal;
     }
+
 
     imageStore(ResultImage, ivec2(gl_LaunchIDNV.xy), vec4(hitColor, 0.));
 }

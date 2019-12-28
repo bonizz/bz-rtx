@@ -8,6 +8,6 @@ layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
 void main()
 {
-    const vec3 backgroundColor = vec3(0., 1., 0.);
-    PrimaryRay.color_distance = vec4(backgroundColor, -1.0);
+    const vec3 skyBlue = vec3(0.529, 0.808, 0.922);
+    PrimaryRay.color_distance = vec4(skyBlue, -1.0);
 }

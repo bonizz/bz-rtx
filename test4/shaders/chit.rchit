@@ -33,7 +33,9 @@ void main()
     vec3 n1 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.y].xyz;
     vec3 n2 = Normals[nonuniformEXT(gl_InstanceCustomIndexNV)].n[ind.z].xyz;
 
-    vec3 N = normalize(interpolate(n0, n1, n2, barycentrics));
+    // normalize before or after? or both?
+    vec3 N = interpolate(n0, n1, n2, barycentrics);
+    N = normalize(vec3(gl_ObjectToWorldNV * vec4(N, 0.)));
 
     vec3 L = normalize(vec3(1., 1., 1.));
 
@@ -42,5 +44,6 @@ void main()
     vec3 color = vec3(ndotl + 0.1);
 
     PrimaryRay.color_distance = vec4(color, gl_HitTNV);
+    PrimaryRay.normal = vec4(N, 0.);
 }
 
