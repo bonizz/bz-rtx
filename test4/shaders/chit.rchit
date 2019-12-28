@@ -19,7 +19,16 @@ vec3 interpolate(vec3 a, vec3 b, vec3 c, vec3 barycentrics)
            c * barycentrics.z;
 }
 
-void main()
+vec3 getBarycentric()
+{
+    vec3 b;
+    b.x = 1.0 - HitAttribs.x - HitAttribs.y;
+    b.y = HitAttribs.x;
+    b.z = HitAttribs.y;
+    return b;
+}
+
+uvec3 getFaceIndex()
 {
     // BONI TODO: when do we _need_ to use nonuniformEXT ?
     // ivec3 ind = ivec3(
@@ -28,37 +37,45 @@ void main()
     //     Indices[nonuniformEXT(gl_InstanceID)].i[3 * gl_PrimitiveID + 2]
     // );
 
+    uvec3 f;
+    f.x = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 0];
+    f.y = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 1];
+    f.z = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2];
+    return f;
+}
+
+vec3 getOneNormal(uint index)
+{
     // vec3 n0 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.x].xyz;
     // vec3 n1 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.y].xyz;
     // vec3 n2 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.z].xyz;
 
-    ivec3 ind = ivec3(
-        Indices[gl_InstanceID].i[3 * gl_PrimitiveID],
-        Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 1],
-        Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2]
-    );
+    vec3 n;
+    n.x = Normals[gl_InstanceID].n[3 * index + 0];
+    n.y = Normals[gl_InstanceID].n[3 * index + 1];
+    n.z = Normals[gl_InstanceID].n[3 * index + 2];
+    return n;
+}
 
-    vec3 n0 = vec3(
-        Normals[gl_InstanceID].n[3*ind.x + 0],
-        Normals[gl_InstanceID].n[3*ind.x + 1],
-        Normals[gl_InstanceID].n[3*ind.x + 2]
-    );
-    vec3 n1 = vec3(
-        Normals[gl_InstanceID].n[3*ind.y + 0],
-        Normals[gl_InstanceID].n[3*ind.y + 1],
-        Normals[gl_InstanceID].n[3*ind.y + 2]
-    );
-    vec3 n2 = vec3(
-        Normals[gl_InstanceID].n[3*ind.z + 0],
-        Normals[gl_InstanceID].n[3*ind.z + 1],
-        Normals[gl_InstanceID].n[3*ind.z + 2]
-    );
+vec3 getNormalWS(uvec3 faceIndex, vec3 barycentric)
+{
+    vec3 n0 = getOneNormal(faceIndex.x);
+    vec3 n1 = getOneNormal(faceIndex.y);
+    vec3 n2 = getOneNormal(faceIndex.z);
 
-    vec3 barycentrics = vec3(1.0 - HitAttribs.x - HitAttribs.y, HitAttribs.x, HitAttribs.y);
+    vec3 n = normalize(interpolate(n0, n1, n2, barycentric));
 
-    // normalize before or after? or both?
-    vec3 N = interpolate(n0, n1, n2, barycentrics);
-    N = normalize(vec3(gl_ObjectToWorldNV * vec4(N, 0.)));
+    vec3 N = normalize(vec3(gl_ObjectToWorldNV * vec4(n, 0.)));
+
+    return N;
+}
+
+void main()
+{
+    uvec3 faceIndex = getFaceIndex();
+    vec3 barycentric = getBarycentric();
+
+    vec3 N = getNormalWS(faceIndex, barycentric);
 
     vec3 L = normalize(vec3(1., 1., 1.));
 
