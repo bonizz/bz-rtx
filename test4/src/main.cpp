@@ -5,10 +5,11 @@
 #include "DeviceVulkan.h"
 #include "camera.h"
 
+// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/chap33.html#acceleration-structure
 struct VkGeometryInstance
 {
     float transform[12];
-    uint32_t instanceId : 24;
+    uint32_t instanceCustomIndex : 24; // gl_InstanceCustomIndexNV
     uint32_t mask : 8;
     uint32_t instanceOffset : 24;
     uint32_t flags : 8;
@@ -381,7 +382,9 @@ bool loadGltfFile(const char* fn, Scene* pScene)
 
 void createScene()
 {
-    bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
+    bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
+    //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
+    //bool res = loadGltfFile("../data/misc-boxes.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -451,7 +454,7 @@ void createScene()
 
         VkGeometryInstance& instance = instances[i];
         memcpy(instance.transform, transform, sizeof(transform));
-        instance.instanceId = i;
+        instance.instanceCustomIndex = i;
         instance.mask = 0xFF;
         instance.instanceOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
@@ -1124,6 +1127,7 @@ int main()
         VK_CHECK(vkQueuePresentKHR(vk.queue, &presentInfo));
 
         glfwPollEvents();
+        if (app.keysDown[GLFW_KEY_ESCAPE]) break;
     }
 
     shutdownApp();
