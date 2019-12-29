@@ -5,8 +5,17 @@
 
 #include "shader-common.h"
 
+struct Face
+{
+    uint i0;
+    uint i1;
+    uint i2;
+    // uvec3 i; // !?! This doesn't work (gets padded to uvec4?!?)
+};
+
 layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
-layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
+// layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
+layout(set = 2, binding = 0) readonly buffer FacesBuffer { Face f[]; } Faces[];
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -38,9 +47,14 @@ uvec3 getFaceIndex()
     // );
 
     uvec3 f;
-    f.x = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 0];
-    f.y = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 1];
-    f.z = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2];
+    // f.x = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 0];
+    // f.y = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 1];
+    // f.z = Indices[gl_InstanceID].i[3 * gl_PrimitiveID + 2];
+    f.x = Faces[gl_InstanceID].f[gl_PrimitiveID].i0;
+    f.y = Faces[gl_InstanceID].f[gl_PrimitiveID].i1;
+    f.z = Faces[gl_InstanceID].f[gl_PrimitiveID].i2;
+
+    // f = Faces[gl_InstanceID].f[gl_PrimitiveID].i;
     return f;
 }
 
