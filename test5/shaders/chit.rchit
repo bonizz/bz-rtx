@@ -16,7 +16,8 @@ struct Material
 };
 
 layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
-layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
+layout(set = 2, binding = 0) readonly buffer UvsBuffer { vec2 uv[]; } Uvs[];
+layout(set = 3, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
 layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
 layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
@@ -24,6 +25,13 @@ layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } M
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
 hitAttributeNV vec2 HitAttribs;
+
+vec2 interpolate(vec2 a, vec2 b, vec2 c, vec3 barycentrics)
+{
+    return a * barycentrics.x + 
+           b * barycentrics.y +
+           c * barycentrics.z;
+}
 
 vec3 interpolate(vec3 a, vec3 b, vec3 c, vec3 barycentrics)
 {
@@ -81,6 +89,16 @@ vec3 getNormalWS(uvec3 faceIndex, vec3 barycentric)
     vec3 N = normalize(vec3(gl_ObjectToWorldNV * vec4(n, 0.)));
 
     return N;
+}
+
+vec2 getUv(uvec3 faceIndex, vec3 barycentric)
+{
+    vec2 uv0 = Uvs[gl_InstanceID].uv[faceIndex.x];
+    vec2 uv1 = Uvs[gl_InstanceID].uv[faceIndex.y];
+    vec2 uv2 = Uvs[gl_InstanceID].uv[faceIndex.z];
+
+    vec2 uv = interpolate(uv0, uv1, uv2, barycentric);
+    return uv;
 }
 
 void main()

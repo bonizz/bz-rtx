@@ -55,6 +55,7 @@ void shutdownApp()
         {
             destroyBufferVulkan(vk, mesh.positions);
             destroyBufferVulkan(vk, mesh.normals);
+            destroyBufferVulkan(vk, mesh.uvs);
             destroyBufferVulkan(vk, mesh.indices);
 
             destroyAccelerationStructure(vk, mesh.blas);
@@ -103,6 +104,7 @@ void createScene()
     std::vector<VkGeometryInstance> instances(meshCount);
 
     app.scene.normalsBufferInfos.resize(meshCount);
+    app.scene.uvsBufferInfos.resize(meshCount);
     app.scene.indicesBufferInfos.resize(nodesCount);
 
     for (size_t i = 0; i < meshCount; i++)
@@ -172,6 +174,11 @@ void createScene()
         normalsBufferInfo.buffer = mesh.normals.buffer;
         normalsBufferInfo.offset = 0;
         normalsBufferInfo.range = mesh.normals.size;
+
+        VkDescriptorBufferInfo& uvsBufferInfo = app.scene.uvsBufferInfos[i];
+        uvsBufferInfo.buffer = mesh.uvs.buffer;
+        uvsBufferInfo.offset = 0;
+        uvsBufferInfo.range = mesh.uvs.size;
 
         VkDescriptorBufferInfo& indicesBufferInfo = app.scene.indicesBufferInfos[i];
         indicesBufferInfo.buffer = mesh.indices.buffer;
@@ -288,7 +295,7 @@ void setupDefaultCamera()
 
 void createDescriptorSetLayouts()
 {
-    app.descriptorSetLayouts.resize(3);
+    const int kNumDescriptorSets = 4;
 
     // Set 0:
     //   Binding 0 -> AS
@@ -297,11 +304,16 @@ void createDescriptorSetLayouts()
     //   Binding 3 -> MeshInstanceData[] (per instance)
     //   Binding 4 -> Material[]
 
-    // Set 1: vec4 normalsArrays[] (per instance)
+    // Set 1: float[3] normalsArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    // Set 2: uint indicesArrays[] (per instance)
+    // Set 2: vec2 uvsArray[] (per instance)
     //   Binding 0-N, where N = mesh count
+
+    // Set 3: uint indicesArrays[] (per instance)
+    //   Binding 0-N, where N = mesh count
+
+    app.descriptorSetLayouts.resize(kNumDescriptorSets);
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
     asLayoutBinding.binding = 0;
@@ -374,7 +386,13 @@ void createDescriptorSetLayouts()
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
         &app.descriptorSetLayouts[1]));
 
-    // Set 2: uint indicesArrays[]
+    // Set 2: float[2] uvsArray[] (per instance)
+    //   Binding 0-N, where N = mesh count
+
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
+        &app.descriptorSetLayouts[3]));
+
+    // Set 3: uint indicesArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
@@ -518,6 +536,7 @@ void createDescriptorSets()
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // MeshInstanceData[]
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // Material[]
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // uvs
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
     };
 
@@ -531,6 +550,7 @@ void createDescriptorSets()
     uint32_t variableDescriptorCounts[] = {
         1,
         meshCount, // normals
+        meshCount, // uvs
         meshCount // indices
     };
 
@@ -625,8 +645,17 @@ void createDescriptorSets()
     normalsBufferWrite.pBufferInfo = app.scene.normalsBufferInfos.data();
     normalsBufferWrite.pTexelBufferView = nullptr;
 
+    VkWriteDescriptorSet uvsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    uvsBufferWrite.dstSet = app.descriptorSets[2];
+    uvsBufferWrite.dstBinding = 0;
+    uvsBufferWrite.descriptorCount = meshCount;
+    uvsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    uvsBufferWrite.pImageInfo = nullptr;
+    uvsBufferWrite.pBufferInfo = app.scene.uvsBufferInfos.data();
+    uvsBufferWrite.pTexelBufferView = nullptr;
+
     VkWriteDescriptorSet indicesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    indicesBufferWrite.dstSet = app.descriptorSets[2];
+    indicesBufferWrite.dstSet = app.descriptorSets[3];
     indicesBufferWrite.dstBinding = 0;
     indicesBufferWrite.descriptorCount = meshCount;
     indicesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -641,6 +670,7 @@ void createDescriptorSets()
         meshInstanceDataBufferWrite,
         materialBufferWrite,
         normalsBufferWrite,
+        uvsBufferWrite,
         indicesBufferWrite
     };
 

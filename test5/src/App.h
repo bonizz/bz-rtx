@@ -24,6 +24,7 @@ struct Mesh
 
     BufferVulkan positions;
     BufferVulkan normals;
+    BufferVulkan uvs;
     BufferVulkan indices;
 
     AccelerationStructureVulkan blas;
@@ -69,6 +70,7 @@ struct Scene
     std::vector<Mesh> meshes;
 
     std::vector<VkDescriptorBufferInfo> normalsBufferInfos;
+    std::vector<VkDescriptorBufferInfo> uvsBufferInfos;
     std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
 
     BufferVulkan cameraBuffer;

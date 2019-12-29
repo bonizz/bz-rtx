@@ -102,13 +102,29 @@ static void loadMesh(DeviceVulkan& vk, tinygltf::Model& gltfModel,
 
         auto& bv = gltfModel.bufferViews[gltfModel.accessors[idNormal].bufferView];
 
-        auto normalCount = gltfModel.accessors[idNormal].count;
+        //auto normalCount = gltfModel.accessors[idNormal].count;
 
         createBufferVulkan(vk, { bv.byteLength,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
             &pMesh->normals);
+    }
+
+    // Load uvs
+    {
+        BASSERT(idTexcoord0 >= 0);
+
+        BASSERT(gltfModel.accessors[idTexcoord0].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
+            && gltfModel.accessors[idTexcoord0].type == TINYGLTF_TYPE_VEC2);
+
+        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idTexcoord0].bufferView];
+
+        createBufferVulkan(vk, { bv.byteLength,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
+            &pMesh->uvs);
     }
 
     // Load indices
@@ -241,7 +257,7 @@ static void loadMaterials(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScen
     {
         Material mat = {};
 
-        readVec4(m.pbrMetallicRoughness.baseColorFactor, &mat.baseColor);
+        readVec4(m.pbrMetallicRoughness.baseColorFactor, &mat.baseColor, glm::vec4(1.f));
 
         materials.push_back(mat);
     }
