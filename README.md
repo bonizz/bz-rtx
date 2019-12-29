@@ -29,3 +29,13 @@ Also loads multi-mesh gltf.
 Refs:
 * https://github.com/KhronosGroup/GLSL/blob/master/extensions/nv/GLSL_NV_ray_tracing.txt
 * http://on-demand.gputechconf.com/gtc/2018/presentation/s8521-advanced-graphics-extensions-for-vulkan.pdf
+
+### 004-sample-materials
+
+Loads baseColorFactor from gltf.
+
+![image](https://user-images.githubusercontent.com/4008312/71553072-9e52b680-29bd-11ea-80a4-24fb6354c16e.png)
+
+Refs:
+* https://github.com/nvpro-samples/vk_raytrace
+* https://github.com/maierfelix/tiny-rtx
