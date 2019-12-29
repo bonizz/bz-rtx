@@ -1,8 +1,8 @@
-workspace "test4"
+workspace "sample-materials"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test4"
+project "sample-materials"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
