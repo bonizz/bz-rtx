@@ -15,16 +15,6 @@ struct Material
     vec4 baseColor;
 };
 
-// BONI note: I can use this structure and the Face elements will get tightly packed
-//  without padding.  If I put a uvec3 within this struct, however, padding will be added.
-// struct Face
-// {
-//     uint i0;
-//     uint i1;
-//     uint i2;
-// };
-// layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
-
 layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
 layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
