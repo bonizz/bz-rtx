@@ -13,7 +13,15 @@ struct Face
     // uvec3 i; // !?! This doesn't work (gets padded to uvec4?!?)
 };
 
-layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
+struct Normal
+{
+    float nx;
+    float ny;
+    float nz;
+};
+
+// layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
+layout(set = 1, binding = 0) readonly buffer NormalsBuffer { Normal n[]; } Normals[];
 // layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 layout(set = 2, binding = 0) readonly buffer FacesBuffer { Face f[]; } Faces[];
 
@@ -65,9 +73,12 @@ vec3 getOneNormal(uint index)
     // vec3 n2 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.z].xyz;
 
     vec3 n;
-    n.x = Normals[gl_InstanceID].n[3 * index + 0];
-    n.y = Normals[gl_InstanceID].n[3 * index + 1];
-    n.z = Normals[gl_InstanceID].n[3 * index + 2];
+    // n.x = Normals[gl_InstanceID].n[3 * index + 0];
+    // n.y = Normals[gl_InstanceID].n[3 * index + 1];
+    // n.z = Normals[gl_InstanceID].n[3 * index + 2];
+    n.x = Normals[gl_InstanceID].n[index].nx;
+    n.y = Normals[gl_InstanceID].n[index].ny;
+    n.z = Normals[gl_InstanceID].n[index].nz;
     return n;
 }
 
