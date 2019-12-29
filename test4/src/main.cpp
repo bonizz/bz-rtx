@@ -1,97 +1,9 @@
 
 #include "pch.h"
 
+#include "App.h"
 #include "logging.h"
-#include "DeviceVulkan.h"
-#include "camera.h"
-
-// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/chap33.html#acceleration-structure
-struct VkGeometryInstance
-{
-    float transform[12];
-    uint32_t instanceCustomIndex : 24; // gl_InstanceCustomIndexNV
-    uint32_t mask : 8;
-    uint32_t instanceOffset : 24;
-    uint32_t flags : 8;
-    uint64_t accelerationStructureHandle;
-};
-
-struct Mesh
-{
-    uint32_t vertexCount;
-    uint32_t indexCount;
-
-    BufferVulkan positions;
-    BufferVulkan normals;
-    BufferVulkan indices;
-
-    AccelerationStructureVulkan blas;
-};
-
-struct CameraUniformData
-{
-    glm::mat4 viewInverse;
-    glm::mat4 projInverse;
-};
-
-struct SceneNode
-{
-    std::string name;
-    int mesh;
-
-    glm::vec3 translation;
-    glm::vec3 scale;
-    glm::quat rotation;
-
-    bool matrixValid;
-    glm::mat4 matrix;
-
-    std::vector<int> children;
-};
-
-struct Scene
-{
-    std::vector<Mesh> meshes;
-
-    std::vector<VkDescriptorBufferInfo> normalsBufferInfos;
-    std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
-
-    std::vector<SceneNode> nodes;
-
-    Camera camera;
-    BufferVulkan cameraBuffer;
-
-    AccelerationStructureVulkan topLevelStruct;
-};
-
-struct App
-{
-    GLFWwindow* window;
-
-    ImageVulkan offscreenImage;
-
-    VkShaderModule raygenShader;
-    VkShaderModule chitShader;
-    VkShaderModule shadowChitShader;
-    VkShaderModule missShader;
-    VkShaderModule shadowMissShader;
-
-    BufferVulkan instancesBuffer;
-    BufferVulkan sbtBuffer;
-
-    VkPipelineLayout pipelineLayout;
-    VkPipeline rtPipeline;
-
-    VkDescriptorPool descriptorPool;
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
-    std::vector<VkDescriptorSet> descriptorSets;
-
-    bool keysDown[GLFW_KEY_LAST + 1];
-    bool mouseDown[GLFW_MOUSE_BUTTON_LAST + 1];
-    glm::vec2 cursorPos;
-
-    Scene scene;
-};
+#include "gltfLoader.h"
 
 const uint32_t kWindowWidth = 800;
 const uint32_t kWindowHeight = 600;
@@ -135,6 +47,8 @@ void shutdownApp()
     vkDeviceWaitIdle(vk.device);
 
     destroyBufferVulkan(vk, app.scene.cameraBuffer);
+    destroyBufferVulkan(vk, app.scene.materialsBuffer);
+    destroyBufferVulkan(vk, app.scene.meshInstanceDataBuffer);
 
     {
         for (auto& mesh : app.scene.meshes)
@@ -174,207 +88,11 @@ void shutdownApp()
     glfwTerminate();
 }
 
-void loadGltfMesh(tinygltf::Model& gltfModel, tinygltf::Mesh& gltfMesh, Mesh* pMesh)
-{
-    // Only handle single triangle primitives (for now).
-    BASSERT(gltfMesh.primitives.size() == 1);
-
-    auto& primitive = gltfMesh.primitives[0];
-
-    BASSERT(primitive.mode == TINYGLTF_MODE_TRIANGLES);
-
-    auto& attrs = primitive.attributes;
-
-    int idPosition = attrs.count("POSITION") == 1 ? attrs["POSITION"] : -1;
-    int idNormal = attrs.count("NORMAL") == 1 ? attrs["NORMAL"] : -1;
-    int idTexcoord0 = attrs.count("TEXCOORD_0") == 1 ? attrs["TEXCOORD_0"] : -1;
-    int idIndices = primitive.indices;
-
-    BASSERT(idPosition >= 0);
-
-    // Load positions
-    {
-        BASSERT(gltfModel.accessors[idPosition].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
-            && gltfModel.accessors[idPosition].type == TINYGLTF_TYPE_VEC3);
-
-        pMesh->vertexCount = (uint32_t)gltfModel.accessors[idPosition].count;
-
-        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idPosition].bufferView];
-
-        //std::vector<glm::vec3> dbgPositions(bv.byteLength / 12);
-        //memcpy(dbgPositions.data(),
-        //    &gltfModel.buffers[bv.buffer].data[bv.byteOffset], bv.byteLength);
-
-        createBufferVulkan(vk, { bv.byteLength,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
-            &pMesh->positions);
-    }
-
-    // Load normals
-    {
-        BASSERT(idNormal >= 0);
-
-        BASSERT(gltfModel.accessors[idNormal].componentType == TINYGLTF_COMPONENT_TYPE_FLOAT
-            && gltfModel.accessors[idNormal].type == TINYGLTF_TYPE_VEC3);
-
-        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idNormal].bufferView];
-
-        auto normalCount = gltfModel.accessors[idNormal].count;
-
-        createBufferVulkan(vk, { bv.byteLength,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            & gltfModel.buffers[bv.buffer].data[bv.byteOffset] },
-            &pMesh->normals);
-    }
-
-    // Load indices
-    {
-        BASSERT(gltfModel.accessors[idIndices].componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT
-            && gltfModel.accessors[idIndices].type == TINYGLTF_TYPE_SCALAR);
-
-        uint32_t indexCount = (uint32_t)gltfModel.accessors[idIndices].count;
-        pMesh->indexCount = indexCount;
-
-        std::vector<uint16_t> indices16(indexCount);
-
-        auto& bv = gltfModel.bufferViews[gltfModel.accessors[idIndices].bufferView];
-
-        memcpy(indices16.data(), &gltfModel.buffers[bv.buffer].data[bv.byteOffset],
-            bv.byteLength);
-
-        std::vector<uint32_t> indices32(indices16.begin(), indices16.end());
-
-        createBufferVulkan(vk, { indexCount * sizeof(uint32_t),
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            indices32.data() }, &pMesh->indices);
-    }
-}
-
-bool loadGltfFile(const char* fn, Scene* pScene)
-{
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-
-    std::string err;
-    std::string warn;
-    bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, fn);
-    BASSERT(ret);
-
-    if (ret == false)
-    {
-        DebugPrint("Error: could not load %s\n", fn);
-        return false;
-    }
-
-    if (model.scenes.size() == 0)
-    {
-        DebugPrint("Error: no scene found in %s\n", fn);
-        return false;
-    }
-
-    size_t meshCount = model.meshes.size();
-    BASSERT(meshCount > 0);
-
-    pScene->meshes.resize(meshCount);
-
-    for (size_t i = 0; i < model.meshes.size(); i++)
-        loadGltfMesh(model, model.meshes[i], &pScene->meshes[i]);
-
-    BASSERT(model.defaultScene == 0);
-    tinygltf::Scene& gltfScene = model.scenes[model.defaultScene];
-
-    pScene->nodes.reserve(gltfScene.nodes.size());
-
-    auto readVec3 = [](auto& src, auto* dst, const glm::vec3& defaultValue) {
-        if (src.size() > 0) {
-            *dst = glm::vec3((float)src[0], (float)src[1], (float)src[2]);
-            return true;
-        } else {
-            *dst = defaultValue;
-            return false;
-        }
-    };
-
-    auto readQuat = [](auto& src, auto* dst, const glm::quat& defaultValue=glm::quat(1.f, 0.f, 0.f, 0.f)) {
-        // glm uses w, x, y, z
-        if (src.size() > 0) {
-            *dst = glm::quat((float)src[3], (float)src[0], (float)src[1], (float)src[2]);
-            return true;
-        } else {
-            *dst = defaultValue;
-            return false;
-        }
-    };
-
-    for (auto i : gltfScene.nodes)
-    {
-        auto& srcNode = model.nodes[i];
-
-        if (srcNode.mesh == -1)
-        {
-            // might be a light or camera.
-
-            if (srcNode.children.size())
-            {
-                auto& childNode = model.nodes[srcNode.children[0]];
-                if (childNode.camera >= 0)
-                {
-                    readVec3(srcNode.translation, &pScene->camera.position, glm::vec3(0.f));
-
-                    glm::quat rot1, rot2;
-                    if (readQuat(srcNode.rotation, &rot1))
-                    {
-                        if (readQuat(childNode.rotation, &rot2))
-                        {
-                            cameraRotate(pScene->camera, rot1 * rot2);
-                        }
-                    }
-
-                    cameraUpdateView(pScene->camera);
-                }
-            }
-
-            continue;
-        }
-
-        pScene->nodes.push_back({});
-        SceneNode& dstNode = pScene->nodes.back();
-
-        dstNode.name = srcNode.name;
-        dstNode.mesh = srcNode.mesh;
-        dstNode.children = srcNode.children;
-
-        readVec3(srcNode.translation, &dstNode.translation, glm::vec3(0.f));
-        readVec3(srcNode.scale, &dstNode.scale, glm::vec3(1.f));
-        readQuat(srcNode.rotation, &dstNode.rotation);
-
-        if (srcNode.matrix.size() > 0)
-        {
-            dstNode.matrixValid = true;
-            memcpy(glm::value_ptr(dstNode.matrix), srcNode.matrix.data(),
-                sizeof(float) * 16);
-        }
-        else
-        {
-            dstNode.matrixValid = false;
-            dstNode.matrix = glm::mat4(1.f);
-        }
-    }
-
-    return true;
-}
-
 void createScene()
 {
     //bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
     //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
-    bool res = loadGltfFile("../data/misc-boxes.gltf", &app.scene);
+    bool res = loadGltfFile(vk, "../data/misc-boxes.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -421,7 +139,7 @@ void createScene()
         // BONI TODO: handle child nodes
         BASSERT(node.children.size() == 0);
 
-        Mesh& mesh = app.scene.meshes[node.mesh];
+        Mesh& mesh = app.scene.meshes[node.meshID];
 
         glm::mat4 TRS;
 
@@ -576,11 +294,13 @@ void createDescriptorSetLayouts()
     //   Binding 0 -> AS
     //   Binding 1 -> output image
     //   Binding 2 -> camera data
+    //   Binding 3 -> MeshInstanceData[] (per instance)
+    //   Binding 4 -> Material[]
 
-    // Set 1: vec4 normalsArrays[]
+    // Set 1: vec4 normalsArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    // Set 2: uint indicesArrays[]
+    // Set 2: uint indicesArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
@@ -601,10 +321,24 @@ void createDescriptorSetLayouts()
     cameraDataLayoutBinding.descriptorCount = 1;
     cameraDataLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
 
+    VkDescriptorSetLayoutBinding meshInstanceDataLayoutBinding = {};
+    meshInstanceDataLayoutBinding.binding = 3;
+    meshInstanceDataLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    meshInstanceDataLayoutBinding.descriptorCount = 1;
+    meshInstanceDataLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+    VkDescriptorSetLayoutBinding materialLayoutBinding = {};
+    materialLayoutBinding.binding = 4;
+    materialLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    materialLayoutBinding.descriptorCount = 1;
+    materialLayoutBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
     VkDescriptorSetLayoutBinding set0Bindings[] = {
         asLayoutBinding,
         outputImageLayoutBinding,
-        cameraDataLayoutBinding
+        cameraDataLayoutBinding,
+        meshInstanceDataLayoutBinding,
+        materialLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo set0LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -624,7 +358,6 @@ void createDescriptorSetLayouts()
     bindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
     bindingFlags.pBindingFlags = &flags;
     bindingFlags.bindingCount = 1;
-
 
     VkDescriptorSetLayoutBinding storageBufferBinding = {};
     storageBufferBinding.binding = 0;
@@ -782,6 +515,8 @@ void createDescriptorSets()
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // camera data
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // MeshInstanceData[]
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // Material[]
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
     };
@@ -853,6 +588,34 @@ void createDescriptorSets()
     camdataBufferWrite.pBufferInfo = &camdataBufferInfo;
     camdataBufferWrite.pTexelBufferView = nullptr;
 
+    VkDescriptorBufferInfo meshInstanceDataBufferInfo = {};
+    meshInstanceDataBufferInfo.buffer = app.scene.meshInstanceDataBuffer.buffer;
+    meshInstanceDataBufferInfo.offset = 0;
+    meshInstanceDataBufferInfo.range = app.scene.meshInstanceDataBuffer.size;
+
+    VkWriteDescriptorSet meshInstanceDataBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    meshInstanceDataBufferWrite.dstSet = app.descriptorSets[0];
+    meshInstanceDataBufferWrite.dstBinding = 3;
+    meshInstanceDataBufferWrite.descriptorCount = 1;
+    meshInstanceDataBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    meshInstanceDataBufferWrite.pImageInfo = nullptr;
+    meshInstanceDataBufferWrite.pBufferInfo = &meshInstanceDataBufferInfo;
+    meshInstanceDataBufferWrite.pTexelBufferView = nullptr;
+
+    VkDescriptorBufferInfo materialBufferInfo = {};
+    materialBufferInfo.buffer = app.scene.materialsBuffer.buffer;
+    materialBufferInfo.offset = 0;
+    materialBufferInfo.range = app.scene.materialsBuffer.size;
+
+    VkWriteDescriptorSet materialBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    materialBufferWrite.dstSet = app.descriptorSets[0];
+    materialBufferWrite.dstBinding = 4;
+    materialBufferWrite.descriptorCount = 1;
+    materialBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    materialBufferWrite.pImageInfo = nullptr;
+    materialBufferWrite.pBufferInfo = &materialBufferInfo;
+    materialBufferWrite.pTexelBufferView = nullptr;
+
     VkWriteDescriptorSet normalsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     normalsBufferWrite.dstSet = app.descriptorSets[1];
     normalsBufferWrite.dstBinding = 0;
@@ -875,6 +638,8 @@ void createDescriptorSets()
         accelStructWrite,
         resImageWrite,
         camdataBufferWrite,
+        meshInstanceDataBufferWrite,
+        materialBufferWrite,
         normalsBufferWrite,
         indicesBufferWrite
     };

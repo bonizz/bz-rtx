@@ -5,6 +5,16 @@
 
 #include "shader-common.h"
 
+struct InstanceData
+{
+    int materialID;
+};
+
+struct Material
+{
+    vec4 baseColor;
+};
+
 // BONI note: I can use this structure and the Face elements will get tightly packed
 //  without padding.  If I put a uvec3 within this struct, however, padding will be added.
 // struct Face
@@ -17,6 +27,9 @@
 
 layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
 layout(set = 2, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
+
+layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
+layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -85,13 +98,22 @@ void main()
     uvec3 faceIndex = getFaceIndex();
     vec3 barycentric = getBarycentric();
 
+    vec3 baseColor = vec3(0.);
+
+    int materialID = MeshInstanceData.d[gl_InstanceID].materialID;
+
+    if (materialID >= 0)
+    {
+        baseColor = Materials.m[materialID].baseColor.rgb;
+    }
+
     vec3 N = getNormalWS(faceIndex, barycentric);
 
     vec3 L = normalize(vec3(1., 1., 1.));
 
     float ndotl = max(0., dot(N, L));
 
-    vec3 color = vec3(ndotl + 0.1);
+    vec3 color = vec3(ndotl * baseColor + 0.1);
 
     PrimaryRay.color_distance = vec4(color, gl_HitTNV);
     PrimaryRay.normal = vec4(N, 0.);

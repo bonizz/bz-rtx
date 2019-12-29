@@ -65,15 +65,15 @@
             ],
             "name" : "Camera",
             "rotation" : [
-                0.48912304639816284,
-                0.29209136962890625,
-                -0.1864093393087387,
-                0.8004329204559326
+                0.6741552352905273,
+                -0.015465282835066319,
+                0.014121588319540024,
+                0.7382927536964417
             ],
             "translation" : [
-                16.913000106811523,
-                12.402216911315918,
-                15.37527847290039
+                -1.176896095275879,
+                10.22048282623291,
+                25.86732292175293
             ]
         },
         {
@@ -110,14 +110,14 @@
             "mesh" : 3,
             "name" : "Cube.003",
             "rotation" : [
-                0,
-                0,
-                0.37822794914245605,
-                0.925712525844574
+                0.2591164708137512,
+                -0.3523912727832794,
+                0.28745079040527344,
+                0.8520863056182861
             ],
             "translation" : [
-                0,
-                2.499141216278076,
+                9.248414039611816,
+                2.3011586666107178,
                 -10.231830596923828
             ]
         },
@@ -134,10 +134,10 @@
             "mesh" : 5,
             "name" : "Cube.004",
             "rotation" : [
-                0,
-                0,
-                -0.14768366515636444,
-                0.9890346527099609
+                -0.17854011058807373,
+                0.11655232310295105,
+                -0.167105033993721,
+                0.9626083970069885
             ],
             "translation" : [
                 0,
@@ -160,16 +160,72 @@
     "materials" : [
         {
             "doubleSided" : true,
+            "name" : "Material.002",
+            "pbrMetallicRoughness" : {
+                "baseColorFactor" : [
+                    0,
+                    0.08831161260604858,
+                    0.8000000715255737,
+                    1
+                ],
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.5
+            }
+        },
+        {
+            "doubleSided" : true,
             "name" : "Material",
             "pbrMetallicRoughness" : {
                 "baseColorFactor" : [
-                    0.800000011920929,
-                    0.800000011920929,
-                    0.800000011920929,
+                    0.14488521218299866,
+                    0.34238332509994507,
+                    0.008044084534049034,
                     1
                 ],
                 "metallicFactor" : 0,
                 "roughnessFactor" : 0.4000000059604645
+            }
+        },
+        {
+            "doubleSided" : true,
+            "name" : "Material.003",
+            "pbrMetallicRoughness" : {
+                "baseColorFactor" : [
+                    0.13758383691310883,
+                    0,
+                    0.11152355372905731,
+                    1
+                ],
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.5
+            }
+        },
+        {
+            "doubleSided" : true,
+            "name" : "Material.005",
+            "pbrMetallicRoughness" : {
+                "baseColorFactor" : [
+                    0.06352794915437698,
+                    0.4572450816631317,
+                    0.8000000715255737,
+                    1
+                ],
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.5
+            }
+        },
+        {
+            "doubleSided" : true,
+            "name" : "Material.004",
+            "pbrMetallicRoughness" : {
+                "baseColorFactor" : [
+                    0.28072184324264526,
+                    0.8000000715255737,
+                    0,
+                    1
+                ],
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.5
             }
         },
         {
@@ -212,7 +268,7 @@
                         "TEXCOORD_0" : 6
                     },
                     "indices" : 3,
-                    "material" : 0
+                    "material" : 1
                 }
             ]
         },
@@ -226,7 +282,7 @@
                         "TEXCOORD_0" : 9
                     },
                     "indices" : 3,
-                    "material" : 0
+                    "material" : 2
                 }
             ]
         },
@@ -239,7 +295,8 @@
                         "NORMAL" : 11,
                         "TEXCOORD_0" : 12
                     },
-                    "indices" : 13
+                    "indices" : 13,
+                    "material" : 3
                 }
             ]
         },
@@ -252,7 +309,8 @@
                         "NORMAL" : 15,
                         "TEXCOORD_0" : 16
                     },
-                    "indices" : 17
+                    "indices" : 17,
+                    "material" : 4
                 }
             ]
         },
@@ -266,7 +324,7 @@
                         "TEXCOORD_0" : 20
                     },
                     "indices" : 21,
-                    "material" : 1
+                    "material" : 5
                 }
             ]
         }

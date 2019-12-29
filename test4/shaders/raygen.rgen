@@ -79,7 +79,7 @@ void main()
             hitColor *= 0.3;
         }
 
-        hitColor = hitNormal;
+        // hitColor = hitNormal;
     }
 
 

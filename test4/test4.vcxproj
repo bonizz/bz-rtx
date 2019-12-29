@@ -331,8 +331,10 @@
     <ClInclude Include="..\external\glm\glm\vec4.hpp" />
     <ClInclude Include="..\external\glm\glm\vector_relational.hpp" />
     <ClInclude Include="..\external\volk\volk.h" />
+    <ClInclude Include="src\App.h" />
     <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\DeviceVulkan.h" />
+    <ClInclude Include="src\gltfLoader.h" />
     <ClInclude Include="src\logging.h" />
     <ClInclude Include="src\pch.h" />
   </ItemGroup>
@@ -342,6 +344,7 @@
     </ClCompile>
     <ClCompile Include="src\Camera.cpp" />
     <ClCompile Include="src\DeviceVulkan.cpp" />
+    <ClCompile Include="src\gltfLoader.cpp" />
     <ClCompile Include="src\logging.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\pch.cpp">

@@ -753,10 +753,16 @@
     <ClInclude Include="..\external\volk\volk.h">
       <Filter>external\volk</Filter>
     </ClInclude>
+    <ClInclude Include="src\App.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="src\Camera.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\DeviceVulkan.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\gltfLoader.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\logging.h">
@@ -774,6 +780,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\DeviceVulkan.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\gltfLoader.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\logging.cpp">
