@@ -467,6 +467,77 @@ bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, 
     return true;
 }
 
+bool createImageVulkanLocal(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, VkCommandBuffer cmdBuffer,
+    size_t size, const void* data,
+    ImageVulkan* pImage, std::vector<BufferVulkan>* pStagingBuffers)
+{
+    createImageVulkan(vk, ci, pImage);
+
+    BufferVulkanCreateInfo stagingCI = {};
+    stagingCI.size = size;
+    stagingCI.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    stagingCI.memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    stagingCI.pSrc = data;
+
+    BufferVulkan stagingBuffer = {};
+    createBufferVulkan(vk, stagingCI, &stagingBuffer);
+    pStagingBuffers->push_back(stagingBuffer);
+
+    VkImageSubresourceRange subresourceRange = {};
+    subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subresourceRange.baseMipLevel = 0;
+    subresourceRange.levelCount = 1; // BONI TODO: specify mip levels here
+    subresourceRange.baseArrayLayer = 0;
+    subresourceRange.layerCount = 1;
+
+    VkImageMemoryBarrier imageMemoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    imageMemoryBarrier.srcAccessMask = 0; // Undefined
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.image = pImage->image;
+    imageMemoryBarrier.subresourceRange = subresourceRange;
+
+    vkCmdPipelineBarrier(cmdBuffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &imageMemoryBarrier);
+
+    VkBufferImageCopy bufferImageCopy = {};
+    bufferImageCopy.bufferOffset = 0;
+    bufferImageCopy.bufferRowLength = 0;  // tightly packed
+    bufferImageCopy.bufferImageHeight = 0;
+    bufferImageCopy.imageSubresource = {};
+    bufferImageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    bufferImageCopy.imageSubresource.mipLevel = 0;
+    bufferImageCopy.imageSubresource.baseArrayLayer = 0;
+    bufferImageCopy.imageSubresource.layerCount = 1;
+    bufferImageCopy.imageExtent = ci.extent;
+
+    vkCmdCopyBufferToImage(cmdBuffer, stagingBuffer.buffer, pImage->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bufferImageCopy);
+
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    vkCmdPipelineBarrier(cmdBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &imageMemoryBarrier);
+
+    return true;
+}
+
 void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image)
 {
     vkDestroyImageView(vk.device, image.view, nullptr);

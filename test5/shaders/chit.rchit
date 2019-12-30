@@ -13,14 +13,22 @@ struct InstanceData
 struct Material
 {
     vec4 baseColor;
+    int baseColorTextureID;
+
+    int pad0;
+    int pad1;
+    int pad2;
 };
+
+layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
+layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
 
 layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
 layout(set = 2, binding = 0) readonly buffer UvsBuffer { vec2 uv[]; } Uvs[];
 layout(set = 3, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
-layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
-layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
+layout(set = 4, binding = 0) uniform sampler LinearSampler;
+layout(set = 4, binding = 1) uniform texture2D Textures[];
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -109,10 +117,20 @@ void main()
     vec3 baseColor = vec3(0.);
 
     int materialID = MeshInstanceData.d[gl_InstanceID].materialID;
+    vec2 uv = getUv(faceIndex, barycentric);
 
+    // BONI TODO: remove these if checks by having defaults
     if (materialID >= 0)
     {
         baseColor = Materials.m[materialID].baseColor.rgb;
+
+        int baseColorTID = Materials.m[materialID].baseColorTextureID;
+
+        if (baseColorTID >= 0)
+        {
+            baseColor = texture(sampler2D(Textures[baseColorTID], LinearSampler), uv).rgb;
+
+        }
     }
 
     vec3 N = getNormalWS(faceIndex, barycentric);

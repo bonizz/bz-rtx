@@ -27,9 +27,11 @@ struct ImageVulkan
     VkImageType type;
     VkFormat format;
     VkExtent3D extent;
+
     VkImage image;
-    VkDeviceMemory memory;
     VkImageView view;
+
+    VkDeviceMemory memory;
 };
 
 struct ImageVulkanCreateInfo
@@ -102,6 +104,11 @@ bool createBufferVulkan(const DeviceVulkan& vk, const BufferVulkanCreateInfo& ci
 void destroyBufferVulkan(const DeviceVulkan& vk, BufferVulkan& buffer);
 
 bool createImageVulkan(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci, ImageVulkan* pImage);
+
+// Returns staging buffers which need to be freed by caller
+bool createImageVulkanLocal(const DeviceVulkan& vk, const ImageVulkanCreateInfo& ci,
+    VkCommandBuffer cmdBuffer, size_t size, const void* data,
+    ImageVulkan* pImage, std::vector<BufferVulkan>* pStagingBuffers);
 
 void destroyImageVulkan(const DeviceVulkan& vk, ImageVulkan& image);
 

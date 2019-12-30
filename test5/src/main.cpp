@@ -62,6 +62,10 @@ void shutdownApp()
         }
     }
 
+    vkDestroySampler(vk.device, app.scene.linearSampler, nullptr);
+    for (auto& img : app.scene.textures)
+        destroyImageVulkan(vk, img);
+
     destroyAccelerationStructure(vk, app.scene.topLevelStruct);
 
     vkDestroyShaderModule(vk.device, app.raygenShader, nullptr);
@@ -93,7 +97,8 @@ void createScene()
 {
     //bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
     //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
-    bool res = loadGltfFile(vk, "../data/misc-boxes.gltf", &app.scene);
+    //bool res = loadGltfFile(vk, "../data/misc-boxes.gltf", &app.scene);
+    bool res = loadGltfFile(vk, "../data/christmas-spheres/christmas-sphere.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -293,10 +298,22 @@ void setupDefaultCamera()
     cameraUpdateProjection(cam);
 }
 
+void createSamplers()
+{
+    VkSamplerCreateInfo samplerCreateInfo = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; // BONI TODO: VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.maxLod = FLT_MAX;
+
+    VK_CHECK(vkCreateSampler(vk.device, &samplerCreateInfo, nullptr, &app.scene.linearSampler));
+}
+
 void createDescriptorSetLayouts()
 {
-    const int kNumDescriptorSets = 4;
-
     // Set 0:
     //   Binding 0 -> AS
     //   Binding 1 -> output image
@@ -313,7 +330,12 @@ void createDescriptorSetLayouts()
     // Set 3: uint indicesArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    app.descriptorSetLayouts.resize(kNumDescriptorSets);
+    // Set 4: (optional: only when textures present)
+    //   Binding 0: linear sampler
+    //   Binding 1: texture2d Textures[]
+    const int numDescriptorSets = (app.scene.textures.size() > 0) ? 5 : 4;
+
+    app.descriptorSetLayouts.resize(numDescriptorSets);
 
     VkDescriptorSetLayoutBinding asLayoutBinding = {};
     asLayoutBinding.binding = 0;
@@ -390,13 +412,45 @@ void createDescriptorSetLayouts()
     //   Binding 0-N, where N = mesh count
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
-        &app.descriptorSetLayouts[3]));
+        &app.descriptorSetLayouts[2]));
 
     // Set 3: uint indicesArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
-        &app.descriptorSetLayouts[2]));
+        &app.descriptorSetLayouts[3]));
+
+    if (app.scene.textures.size() > 0)
+    {
+        // Set 4:
+        //   Binding 0: linear sampler
+        //   Binding 1: texture2d Textures[]
+
+        VkDescriptorSetLayoutBinding linearSamplerBinding = {};
+        linearSamplerBinding.binding = 0;
+        linearSamplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        linearSamplerBinding.descriptorCount = 1;
+        linearSamplerBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+        VkDescriptorSetLayoutBinding texturesBinding = {};
+        texturesBinding.binding = 1;
+        texturesBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        texturesBinding.descriptorCount = (uint32_t)app.scene.textures.size();
+        texturesBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+
+        VkDescriptorSetLayoutBinding set4Bindings[] = {
+            linearSamplerBinding,
+            texturesBinding
+        };
+
+        VkDescriptorSetLayoutCreateInfo set4LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        set4LayoutInfo.flags = 0;
+        set4LayoutInfo.bindingCount = (uint32_t)std::size(set4Bindings);
+        set4LayoutInfo.pBindings = set4Bindings;
+
+        VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set4LayoutInfo, nullptr,
+            &app.descriptorSetLayouts[4]));
+    }
 }
 
 void createRaytracingPipeline()
@@ -529,35 +583,54 @@ void createDescriptorSets()
 
     app.descriptorSets.resize(app.descriptorSetLayouts.size());
 
-    VkDescriptorPoolSize poolSizes[] = {
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        // set 0
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // camera data
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // MeshInstanceData[]
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // Material[]
+        // set 1
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
+        // set 2
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // uvs
+        // set 3
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
     };
 
+    if (app.scene.textures.size() > 0)
+    {
+        // set 4
+        poolSizes.push_back({ VK_DESCRIPTOR_TYPE_SAMPLER, 1 }); // linear sampler
+
+        poolSizes.push_back({ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            (uint32_t)app.scene.textures.size() }); // texture2D[]
+    }
+
     VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     descPoolCreateInfo.poolSizeCount = (uint32_t)std::size(poolSizes);
-    descPoolCreateInfo.pPoolSizes = poolSizes;
+    descPoolCreateInfo.pPoolSizes = poolSizes.data();
     descPoolCreateInfo.maxSets = (uint32_t)app.descriptorSetLayouts.size();
 
     VK_CHECK(vkCreateDescriptorPool(vk.device, &descPoolCreateInfo, nullptr, &app.descriptorPool));
 
-    uint32_t variableDescriptorCounts[] = {
-        1,
-        meshCount, // normals
-        meshCount, // uvs
-        meshCount // indices
+    std::vector<uint32_t> variableDescriptorCounts = {
+        1, // set 0
+        meshCount, // set 1: normals
+        meshCount, // set 2: uvs
+        meshCount, // set 3: indices
     };
+
+    if (app.scene.textures.size() > 0)
+    {
+        variableDescriptorCounts.push_back(1); // set 4 sampler/textures
+    }
+
 
     VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountInfo = {};
     variableDescriptorCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
     variableDescriptorCountInfo.descriptorSetCount = (uint32_t)std::size(variableDescriptorCounts);
-    variableDescriptorCountInfo.pDescriptorCounts = variableDescriptorCounts;
+    variableDescriptorCountInfo.pDescriptorCounts = variableDescriptorCounts.data();
 
     VkDescriptorSetAllocateInfo descSetAllocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     descSetAllocInfo.pNext = &variableDescriptorCountInfo;
@@ -663,7 +736,7 @@ void createDescriptorSets()
     indicesBufferWrite.pBufferInfo = app.scene.indicesBufferInfos.data();
     indicesBufferWrite.pTexelBufferView = nullptr;
 
-    VkWriteDescriptorSet descriptorWrites[] = {
+    std::vector<VkWriteDescriptorSet> descriptorWrites = {
         accelStructWrite,
         resImageWrite,
         camdataBufferWrite,
@@ -674,7 +747,35 @@ void createDescriptorSets()
         indicesBufferWrite
     };
 
-    vkUpdateDescriptorSets(vk.device, (uint32_t)std::size(descriptorWrites), descriptorWrites, 0, VK_NULL_HANDLE);
+    if (app.scene.textures.size() > 0)
+    {
+        VkDescriptorImageInfo linearSamplerImageInfo = {};
+        linearSamplerImageInfo.sampler = app.scene.linearSampler;
+
+        VkWriteDescriptorSet samplerBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        samplerBufferWrite.dstSet = app.descriptorSets[4];
+        samplerBufferWrite.dstBinding = 0;
+        samplerBufferWrite.descriptorCount = 1;
+        samplerBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        samplerBufferWrite.pImageInfo = &linearSamplerImageInfo;
+        samplerBufferWrite.pBufferInfo = nullptr;
+        samplerBufferWrite.pTexelBufferView = nullptr;
+
+        VkWriteDescriptorSet texturesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        texturesBufferWrite.dstSet = app.descriptorSets[4];
+        texturesBufferWrite.dstBinding = 1;
+        texturesBufferWrite.descriptorCount = (uint32_t)app.scene.textures.size();
+        texturesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        texturesBufferWrite.pImageInfo = app.scene.textureInfos.data();
+        texturesBufferWrite.pBufferInfo = nullptr;
+        texturesBufferWrite.pTexelBufferView = nullptr;
+
+        descriptorWrites.push_back(samplerBufferWrite);
+        descriptorWrites.push_back(texturesBufferWrite);
+    }
+
+    vkUpdateDescriptorSets(vk.device, (uint32_t)std::size(descriptorWrites),
+        descriptorWrites.data(), 0, VK_NULL_HANDLE);
 }
 
 void fillCommandBuffers()
@@ -845,6 +946,7 @@ int main()
 
     createScene();
 
+    createSamplers();
     createDescriptorSetLayouts();
     createRaytracingPipeline();
     createShaderBindingTable();

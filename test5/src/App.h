@@ -34,6 +34,8 @@ struct Mesh
 struct Material
 {
     glm::vec4 baseColor;
+    uint32_t baseColorTextureID;
+    uint32_t pad[3];
 };
 
 struct CameraUniformData
@@ -73,9 +75,16 @@ struct Scene
     std::vector<VkDescriptorBufferInfo> uvsBufferInfos;
     std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
 
+    std::vector<ImageVulkan> textures;
+    std::vector<VkDescriptorImageInfo> textureInfos;
+
+
     BufferVulkan cameraBuffer;
     BufferVulkan meshInstanceDataBuffer;
     BufferVulkan materialsBuffer;
+
+
+    VkSampler linearSampler;
 
     Camera camera;
 
