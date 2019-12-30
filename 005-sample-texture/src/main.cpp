@@ -774,7 +774,7 @@ void createDescriptorSets()
         VkWriteDescriptorSet baseColorTexturesWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         baseColorTexturesWrite.dstSet = app.descriptorSets[4];
         baseColorTexturesWrite.dstBinding = 1;
-        baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.textures.size();
+        baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.baseColorTextureInfos.size();
         baseColorTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         baseColorTexturesWrite.pImageInfo = app.scene.baseColorTextureInfos.data();
         baseColorTexturesWrite.pBufferInfo = nullptr;
