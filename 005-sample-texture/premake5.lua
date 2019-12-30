@@ -1,8 +1,8 @@
-workspace "test5"
+workspace "sample-texture"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test5"
+project "sample-texture"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"

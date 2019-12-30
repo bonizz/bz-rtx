@@ -11,10 +11,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{3A756B10-A689-93C1-6F0B-3721DBDE8FF2}</ProjectGuid>
+    <ProjectGuid>{C5684AF4-B136-3EFA-9ACA-AE2086371A5F}</ProjectGuid>
     <IgnoreWarnCompileDuplicatedFilename>true</IgnoreWarnCompileDuplicatedFilename>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>test5</RootNamespace>
+    <RootNamespace>sample-texture</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win64|x64'" Label="Configuration">
@@ -43,14 +43,14 @@
     <LinkIncremental>true</LinkIncremental>
     <OutDir>bin\Win64\Debug\</OutDir>
     <IntDir>obj\Win64\Debug\</IntDir>
-    <TargetName>test5_D</TargetName>
+    <TargetName>sample-texture_D</TargetName>
     <TargetExt>.exe</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Win64|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>bin\Win64\Release\</OutDir>
     <IntDir>obj\Win64\Release\</IntDir>
-    <TargetName>test5</TargetName>
+    <TargetName>sample-texture</TargetName>
     <TargetExt>.exe</TargetExt>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win64|x64'">
