@@ -63,6 +63,10 @@ void shutdownApp()
     }
 
     vkDestroySampler(vk.device, app.scene.linearSampler, nullptr);
+
+    destroyImageVulkan(vk, app.scene.fallbackTextureBlack);
+    destroyImageVulkan(vk, app.scene.fallbackTextureWhite);
+
     for (auto& img : app.scene.textures)
         destroyImageVulkan(vk, img);
 
@@ -91,6 +95,34 @@ void shutdownApp()
 
     glfwDestroyWindow(app.window);
     glfwTerminate();
+}
+
+void createFallbackTextures()
+{
+    const uint8_t black[] = { 0, 0, 0, 0 };
+    const uint8_t white[] = { 255, 255, 255, 255 };
+
+    std::vector<BufferVulkan> stagingBuffers;
+
+    ImageVulkanCreateInfo ci = {};
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ci.extent = { 1, 1, 1 };
+    ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ci.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    auto cmdBuffer = createOneTimeCommandBuffer(vk);
+
+    createImageVulkanLocal(vk, ci, cmdBuffer, 4, black,
+        &app.scene.fallbackTextureBlack, &stagingBuffers);
+
+    createImageVulkanLocal(vk, ci, cmdBuffer, 4, white,
+        &app.scene.fallbackTextureWhite, &stagingBuffers);
+
+    submitOneTimeCommandBuffer(vk, cmdBuffer);
+
+    for (auto& b : stagingBuffers)
+        destroyBufferVulkan(vk, b);
 }
 
 void createScene()
@@ -228,17 +260,7 @@ void createScene()
         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT }, &scratchBuffer);
 
-    VkCommandBufferAllocateInfo commandBufferAllocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    commandBufferAllocateInfo.commandPool = vk.commandPool;
-    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    commandBufferAllocateInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateCommandBuffers(vk.device, &commandBufferAllocateInfo, &cmdBuffer));
-
-    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+    VkCommandBuffer cmdBuffer = createOneTimeCommandBuffer(vk);
 
     VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
     memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
@@ -265,18 +287,7 @@ void createScene()
             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
             0, 1, &memoryBarrier, 0, 0, 0, 0);
 
-    vkEndCommandBuffer(cmdBuffer);
-
-    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmdBuffer;
-
-    VK_CHECK(vkQueueSubmit(vk.queue, 1, &submitInfo, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(vk.queue));
-
-    vkFreeCommandBuffers(vk.device, vk.commandPool, 1, &cmdBuffer);
+    submitOneTimeCommandBuffer(vk, cmdBuffer);
 
     destroyBufferVulkan(vk, scratchBuffer);
 }
@@ -319,7 +330,7 @@ void createDescriptorSetLayouts()
     //   Binding 1 -> output image
     //   Binding 2 -> camera data
     //   Binding 3 -> MeshInstanceData[] (per instance)
-    //   Binding 4 -> Material[]
+    //   Binding 4 -> Material[] (material count)
 
     // Set 1: float[3] normalsArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
@@ -332,7 +343,7 @@ void createDescriptorSetLayouts()
 
     // Set 4: (optional: only when textures present)
     //   Binding 0: linear sampler
-    //   Binding 1: texture2d Textures[]
+    //   Binding 1: texture2d baseColorTextures[] (material count)
     const int numDescriptorSets = (app.scene.textures.size() > 0) ? 5 : 4;
 
     app.descriptorSetLayouts.resize(numDescriptorSets);
@@ -432,15 +443,15 @@ void createDescriptorSetLayouts()
         linearSamplerBinding.descriptorCount = 1;
         linearSamplerBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
 
-        VkDescriptorSetLayoutBinding texturesBinding = {};
-        texturesBinding.binding = 1;
-        texturesBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        texturesBinding.descriptorCount = (uint32_t)app.scene.textures.size();
-        texturesBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+        VkDescriptorSetLayoutBinding baseColorTexturesBinding = {};
+        baseColorTexturesBinding.binding = 1;
+        baseColorTexturesBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        baseColorTexturesBinding.descriptorCount = (uint32_t)app.scene.baseColorTextureInfos.size();
+        baseColorTexturesBinding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
 
         VkDescriptorSetLayoutBinding set4Bindings[] = {
             linearSamplerBinding,
-            texturesBinding
+            baseColorTexturesBinding
         };
 
         VkDescriptorSetLayoutCreateInfo set4LayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -604,7 +615,7 @@ void createDescriptorSets()
         poolSizes.push_back({ VK_DESCRIPTOR_TYPE_SAMPLER, 1 }); // linear sampler
 
         poolSizes.push_back({ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            (uint32_t)app.scene.textures.size() }); // texture2D[]
+            (uint32_t)app.scene.baseColorTextureInfos.size() }); // baseColorTextures[]
     }
 
     VkDescriptorPoolCreateInfo descPoolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -625,7 +636,6 @@ void createDescriptorSets()
     {
         variableDescriptorCounts.push_back(1); // set 4 sampler/textures
     }
-
 
     VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountInfo = {};
     variableDescriptorCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
@@ -752,26 +762,26 @@ void createDescriptorSets()
         VkDescriptorImageInfo linearSamplerImageInfo = {};
         linearSamplerImageInfo.sampler = app.scene.linearSampler;
 
-        VkWriteDescriptorSet samplerBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        samplerBufferWrite.dstSet = app.descriptorSets[4];
-        samplerBufferWrite.dstBinding = 0;
-        samplerBufferWrite.descriptorCount = 1;
-        samplerBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        samplerBufferWrite.pImageInfo = &linearSamplerImageInfo;
-        samplerBufferWrite.pBufferInfo = nullptr;
-        samplerBufferWrite.pTexelBufferView = nullptr;
+        VkWriteDescriptorSet samplerWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        samplerWrite.dstSet = app.descriptorSets[4];
+        samplerWrite.dstBinding = 0;
+        samplerWrite.descriptorCount = 1;
+        samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        samplerWrite.pImageInfo = &linearSamplerImageInfo;
+        samplerWrite.pBufferInfo = nullptr;
+        samplerWrite.pTexelBufferView = nullptr;
 
-        VkWriteDescriptorSet texturesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        texturesBufferWrite.dstSet = app.descriptorSets[4];
-        texturesBufferWrite.dstBinding = 1;
-        texturesBufferWrite.descriptorCount = (uint32_t)app.scene.textures.size();
-        texturesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        texturesBufferWrite.pImageInfo = app.scene.textureInfos.data();
-        texturesBufferWrite.pBufferInfo = nullptr;
-        texturesBufferWrite.pTexelBufferView = nullptr;
+        VkWriteDescriptorSet baseColorTexturesWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        baseColorTexturesWrite.dstSet = app.descriptorSets[4];
+        baseColorTexturesWrite.dstBinding = 1;
+        baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.textures.size();
+        baseColorTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        baseColorTexturesWrite.pImageInfo = app.scene.baseColorTextureInfos.data();
+        baseColorTexturesWrite.pBufferInfo = nullptr;
+        baseColorTexturesWrite.pTexelBufferView = nullptr;
 
-        descriptorWrites.push_back(samplerBufferWrite);
-        descriptorWrites.push_back(texturesBufferWrite);
+        descriptorWrites.push_back(samplerWrite);
+        descriptorWrites.push_back(baseColorTexturesWrite);
     }
 
     vkUpdateDescriptorSets(vk.device, (uint32_t)std::size(descriptorWrites),
@@ -943,6 +953,8 @@ int main()
     }
 
     setupDefaultCamera();
+
+    createFallbackTextures();
 
     createScene();
 

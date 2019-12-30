@@ -121,3 +121,6 @@ bool createAccelerationStructureVulkan(const DeviceVulkan& vk,
 void destroyAccelerationStructure(const DeviceVulkan& vk,
     AccelerationStructureVulkan& as);
 
+VkCommandBuffer createOneTimeCommandBuffer(const DeviceVulkan& vk);
+void submitOneTimeCommandBuffer(const DeviceVulkan& vk, VkCommandBuffer cmdBuffer);
+

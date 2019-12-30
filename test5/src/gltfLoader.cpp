@@ -251,6 +251,11 @@ static void loadMaterials(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScen
 {
     // Note: Only loading PBR Metal/Roughness properties (not specular extension)
     std::vector<Material> materials(model.materials.size());
+    pScene->baseColorTextureInfos.resize(model.materials.size());
+
+    auto& textures = pScene->textures;
+    VkImageView fallbackBlackView = pScene->fallbackTextureBlack.view;
+    VkImageView fallbackWhiteView = pScene->fallbackTextureWhite.view;
 
     for (size_t i = 0; i < model.materials.size(); i++)
     {
@@ -259,9 +264,17 @@ static void loadMaterials(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScen
 
         auto& pbr = gltfMat.pbrMetallicRoughness;
 
-        readVec4(pbr.baseColorFactor, &mat.baseColor, glm::vec4(1.f));
+        readVec4(pbr.baseColorFactor, &mat.baseColorFactor, glm::vec4(1.f));
 
-        mat.baseColorTextureID = pbr.baseColorTexture.index;
+        int baseColorID = pbr.baseColorTexture.index;
+
+        VkImageView baseColorView = baseColorID >= 0 ?
+            textures[baseColorID].view : fallbackWhiteView;
+
+        auto& baseColorInfos = pScene->baseColorTextureInfos[i];
+        baseColorInfos.sampler = nullptr;
+        baseColorInfos.imageView = baseColorView;
+        baseColorInfos.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
     createBufferVulkan(vk, { sizeof(Material) * materials.size(),
@@ -275,20 +288,9 @@ static void loadImages(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScene)
     if (model.images.size() == 0)
         return;
 
-    VkCommandBufferAllocateInfo cmdBuffAllocInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    cmdBuffAllocInfo.commandPool = vk.commandPool;
-    cmdBuffAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdBuffAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateCommandBuffers(vk.device, &cmdBuffAllocInfo, &cmdBuffer));
-
-    VkCommandBufferBeginInfo cmdBuffBeginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    cmdBuffBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuffer, &cmdBuffBeginInfo);
+    VkCommandBuffer cmdBuffer = createOneTimeCommandBuffer(vk);
 
     pScene->textures.resize(model.images.size());
-    pScene->textureInfos.resize(model.images.size());
 
     std::vector<BufferVulkan> stagingBuffers;
 
@@ -305,25 +307,9 @@ static void loadImages(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScene)
             &texture, &stagingBuffers);
 
         // BONI TODO: generate mips
-
-        auto& bi = pScene->textureInfos[i];
-        bi.sampler = nullptr;
-        bi.imageView = texture.view;
-        bi.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    vkEndCommandBuffer(cmdBuffer);
-
-    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmdBuffer;
-
-    VK_CHECK(vkQueueSubmit(vk.queue, 1, &submitInfo, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(vk.queue));
-
-    vkFreeCommandBuffers(vk.device, vk.commandPool, 1, &cmdBuffer);
+    submitOneTimeCommandBuffer(vk, cmdBuffer);
 
     for (auto& b : stagingBuffers)
         destroyBufferVulkan(vk, b);
@@ -358,9 +344,9 @@ bool loadGltfFile(DeviceVulkan& vk, const char* fn, Scene* pScene)
 
     loadMeshInstanceData(vk, pScene);
 
-    loadMaterials(vk, model, pScene);
-
     loadImages(vk, model, pScene);
+
+    loadMaterials(vk, model, pScene);
 
     return true;
 }

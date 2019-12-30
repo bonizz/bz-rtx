@@ -33,9 +33,7 @@ struct Mesh
 // BONI NOTE: keep this padded to 16 bytes
 struct Material
 {
-    glm::vec4 baseColor;
-    uint32_t baseColorTextureID;
-    uint32_t pad[3];
+    glm::vec4 baseColorFactor;
 };
 
 struct CameraUniformData
@@ -76,13 +74,15 @@ struct Scene
     std::vector<VkDescriptorBufferInfo> indicesBufferInfos;
 
     std::vector<ImageVulkan> textures;
-    std::vector<VkDescriptorImageInfo> textureInfos;
 
+    std::vector<VkDescriptorImageInfo>  baseColorTextureInfos;
+
+    ImageVulkan fallbackTextureBlack;
+    ImageVulkan fallbackTextureWhite;
 
     BufferVulkan cameraBuffer;
     BufferVulkan meshInstanceDataBuffer;
     BufferVulkan materialsBuffer;
-
 
     VkSampler linearSampler;
 

@@ -629,3 +629,36 @@ void destroyAccelerationStructure(const DeviceVulkan& vk, AccelerationStructureV
     vkFreeMemory(vk.device, as.memory, nullptr);
 }
 
+VkCommandBuffer createOneTimeCommandBuffer(const DeviceVulkan& vk)
+{
+    VkCommandBufferAllocateInfo cmdBuffAllocInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    cmdBuffAllocInfo.commandPool = vk.commandPool;
+    cmdBuffAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdBuffAllocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateCommandBuffers(vk.device, &cmdBuffAllocInfo, &cmdBuffer));
+
+    VkCommandBufferBeginInfo cmdBuffBeginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    cmdBuffBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &cmdBuffBeginInfo);
+
+    return cmdBuffer;
+}
+
+void submitOneTimeCommandBuffer(const DeviceVulkan& vk, VkCommandBuffer cmdBuffer)
+{
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+
+    VK_CHECK(vkQueueSubmit(vk.queue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(vk.queue));
+
+    vkFreeCommandBuffers(vk.device, vk.commandPool, 1, &cmdBuffer);
+}
+
