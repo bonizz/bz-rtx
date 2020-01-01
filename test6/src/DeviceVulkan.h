@@ -1,9 +1,10 @@
 #pragma once
 
-#define VK_CHECK(_error) do { \
-    if (_error != VK_SUCCESS) { \
-        DebugPrint("VK_CHECK result: %d\n", _error); \
-        BASSERT(!#_error); \
+#define VK_CHECK(f) do { \
+    VkResult r = f; \
+    if (r != VK_SUCCESS) { \
+        DebugPrint("VK_CHECK result: %d\n", r); \
+        BASSERT(!#f); \
     } \
 } while (false)
 
