@@ -1,8 +1,8 @@
-workspace "test6"
+workspace "sample-reflection"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test6"
+project "sample-reflection"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
