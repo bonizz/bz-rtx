@@ -10,6 +10,8 @@ const uint32_t kWindowHeight = 600;
 const float kCameraRotationSpeed = 0.25f;
 const float kCameraMoveSpeed = 2.f;
 
+const bool kVsync = true;
+
 static DeviceVulkan vk;
 static App app;
 
@@ -31,7 +33,7 @@ bool initApp()
 
     HWND hwnd = glfwGetWin32Window(app.window);
 
-    if (!createDeviceVulkan({hwnd, kWindowWidth, kWindowHeight}, &vk))
+    if (!createDeviceVulkan({hwnd, kWindowWidth, kWindowHeight, kVsync}, &vk))
         return false;
 
     createImageVulkan(vk, { VK_IMAGE_TYPE_2D, vk.surfaceFormat.format,

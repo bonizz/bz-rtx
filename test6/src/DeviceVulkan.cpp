@@ -29,8 +29,11 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT 
     return VK_FALSE;
 }
 
-static VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
+static VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, bool vsync)
 {
+    if (vsync)
+        return VK_PRESENT_MODE_FIFO_KHR;
+
     uint32_t presentModeCount;
     vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
@@ -226,7 +229,7 @@ bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVu
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk.physicalDevice, vk.surface, &surfaceCapabilities));
 
-    VkPresentModeKHR presentMode = getPresentMode(vk.physicalDevice, vk.surface);
+    VkPresentModeKHR presentMode = getPresentMode(vk.physicalDevice, vk.surface, ci.vsync);
 
     VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     swapchainCreateInfo.flags = 0;

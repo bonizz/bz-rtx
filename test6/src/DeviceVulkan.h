@@ -91,6 +91,7 @@ struct DeviceVulkanCreateInfo
     void* hwnd;
     uint32_t windowWidth;
     uint32_t windowHeight;
+    bool vsync;
 };
 
 bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVulkan);
