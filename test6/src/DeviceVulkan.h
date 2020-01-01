@@ -2,6 +2,7 @@
 
 #define VK_CHECK(_error) do { \
     if (_error != VK_SUCCESS) { \
+        DebugPrint("VK_CHECK result: %d\n", _error); \
         BASSERT(!#_error); \
     } \
 } while (false)
