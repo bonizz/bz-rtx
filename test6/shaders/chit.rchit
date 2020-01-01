@@ -15,6 +15,7 @@ struct Material
     vec4 baseColorFactor;
 };
 
+layout(set = 0, binding = 0) uniform accelerationStructureNV Scene;
 layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
 layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
 
@@ -122,6 +123,7 @@ void main()
         vec3 baseColorSample = texture(sampler2D(BaseColorTextures[materialID], LinearSampler), uv).rgb;
 
         baseColor = baseColorSample * baseColorFactor;
+        // baseColor = baseColorFactor;
     }
 
     vec3 N = getNormalWS(faceIndex, barycentric);
@@ -132,7 +134,22 @@ void main()
 
     vec3 color = vec3(ndotl * baseColor + 0.1);
 
-    PrimaryRay.color_distance = vec4(color, gl_HitTNV);
-    PrimaryRay.normal = vec4(N, 0.);
+    if (baseColor.r < 1.0)
+    {
+        vec3 hitPos = gl_WorldRayOriginNV + gl_WorldRayDirectionNV * gl_HitTNV;
+        vec3 origin = hitPos + N * 0.001;
+        vec3 dir = reflect(gl_WorldRayDirectionNV, N);
+
+        uint flags = gl_RayFlagsOpaqueNV;
+
+        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
+
+        PrimaryRay.color_distance.rgb *= color;
+    }
+    else
+    {
+        PrimaryRay.color_distance = vec4(color, gl_HitTNV);
+        PrimaryRay.normal = vec4(N, 0.);
+    }
 }
 

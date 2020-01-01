@@ -130,7 +130,7 @@ void createScene()
     //bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
     //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
     //bool res = loadGltfFile(vk, "../data/misc-boxes.gltf", &app.scene);
-    bool res = loadGltfFile(vk, "../data/christmas-spheres/christmas-sphere.gltf", &app.scene);
+    bool res = loadGltfFile(vk, "../data/reflection-test1.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes
@@ -204,7 +204,7 @@ void createScene()
         instance.instanceCustomIndex = 0; // We can use gl_InstanceID if we're just using `i` here.
         instance.mask = 0xFF;
         instance.instanceOffset = 0;
-        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
+        instance.flags = 0; // VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
         instance.accelerationStructureHandle = mesh.blas.handle;
 
         VkDescriptorBufferInfo& normalsBufferInfo = app.scene.normalsBufferInfos[i];
@@ -352,7 +352,7 @@ void createDescriptorSetLayouts()
     asLayoutBinding.binding = 0;
     asLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
     asLayoutBinding.descriptorCount = 1;
-    asLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+    asLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV | VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
 
     VkDescriptorSetLayoutBinding outputImageLayoutBinding = {};
     outputImageLayoutBinding.binding = 1;
@@ -774,7 +774,7 @@ void createDescriptorSets()
         VkWriteDescriptorSet baseColorTexturesWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         baseColorTexturesWrite.dstSet = app.descriptorSets[4];
         baseColorTexturesWrite.dstBinding = 1;
-        baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.textures.size();
+        baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.baseColorTextureInfos.size();
         baseColorTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         baseColorTexturesWrite.pImageInfo = app.scene.baseColorTextureInfos.data();
         baseColorTexturesWrite.pBufferInfo = nullptr;
