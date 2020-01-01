@@ -1,6 +1,6 @@
 # Vulkan RTX samples
 
-### 001-sample-triangle
+### 01-sample-triangle
 
 Simple triangle example.
 
@@ -12,14 +12,14 @@ Refs:
 * https://developer.nvidia.com/rtx/raytracing/vkray
 
 
-### 002-sample-gltf
+### 02-sample-gltf
 
 Loads single-mesh gltf file.
 
 ![image](https://user-images.githubusercontent.com/4008312/71532798-fdbfa200-28a9-11ea-969d-45f0b62cb789.png)
 
 
-### 003-sample-shadows
+### 03-sample-shadows
 
 Adds another traceNV call to check if object is in shadow.
 
@@ -32,7 +32,7 @@ Refs:
 * http://on-demand.gputechconf.com/gtc/2018/presentation/s8521-advanced-graphics-extensions-for-vulkan.pdf
 
 
-### 004-sample-materials
+### 04-sample-materials
 
 Loads baseColorFactor from gltf.
 
@@ -43,7 +43,7 @@ Refs:
 * https://github.com/maierfelix/tiny-rtx
 
 
-### 005-sample-texture
+### 05-sample-texture
 
 Loads baseColor texture from gltf.
 
@@ -63,7 +63,7 @@ Understanding alignment
 Textures
 - https://cc0textures.com
 
-### 006-sample-reflection
+### 06-sample-reflection
 
 Adds a trace call from hit shader for non-red materials.
 
