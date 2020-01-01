@@ -41,6 +41,8 @@ void main()
     float tmin = 0.001;
     float tmax = 10000.0;
 
+    PrimaryRay.depth = 0;
+
     traceNV(Scene, rayFlags, 0xFF,
         0, // sbtRecordOffset
         0, // sbtRecordStride

@@ -5,6 +5,8 @@
 
 #include "shader-common.h"
 
+const int kMaxDepth = 4;
+
 struct InstanceData
 {
     int materialID;
@@ -135,7 +137,9 @@ void main()
 
     vec3 color = vec3(ndotl * baseColor + 0.1);
 
-    if (baseColor.r < 1.0)
+    PrimaryRay.depth += 1;
+
+    if (baseColor.r < 1.0 && PrimaryRay.depth < kMaxDepth)
     {
         vec3 hitPos = gl_WorldRayOriginNV + gl_WorldRayDirectionNV * gl_HitTNV;
         vec3 origin = hitPos + N * 0.001;
@@ -152,5 +156,7 @@ void main()
         PrimaryRay.color_distance = vec4(color, gl_HitTNV);
         PrimaryRay.normal = vec4(N, 0.);
     }
+
+    PrimaryRay.depth -= 1;
 }
 

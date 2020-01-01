@@ -6,6 +6,8 @@
 // validation layers appear to interfere with nsight /shrug
 // renderdoc currently not supported with raytracing
 static bool s_enableValidation = true;
+//const uint32_t kSwapchainImageCount = 3;
+const uint32_t kSwapchainImageCount = 2;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(VkDebugReportFlagsEXT flags,
     VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location,
@@ -234,7 +236,7 @@ bool createDeviceVulkan(const DeviceVulkanCreateInfo& ci, DeviceVulkan* deviceVu
     VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     swapchainCreateInfo.flags = 0;
     swapchainCreateInfo.surface = vk.surface;
-    swapchainCreateInfo.minImageCount = surfaceCapabilities.minImageCount;
+    swapchainCreateInfo.minImageCount = std::min(kSwapchainImageCount, surfaceCapabilities.maxImageCount);
     swapchainCreateInfo.imageFormat = vk.surfaceFormat.format;
     swapchainCreateInfo.imageColorSpace = vk.surfaceFormat.colorSpace;
     swapchainCreateInfo.imageExtent.width = ci.windowWidth;

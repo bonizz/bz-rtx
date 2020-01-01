@@ -10,6 +10,7 @@ struct RayPayload
 {
     vec4 color_distance;
     vec4 normal;
+    int depth;
 };
 
 struct ShadowRayPayload
