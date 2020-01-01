@@ -122,8 +122,9 @@ void main()
 
         vec3 baseColorSample = texture(sampler2D(BaseColorTextures[materialID], LinearSampler), uv).rgb;
 
+        baseColorSample = srgbToLinear(baseColorSample);
+
         baseColor = baseColorSample * baseColorFactor;
-        // baseColor = baseColorFactor;
     }
 
     vec3 N = getNormalWS(faceIndex, barycentric);
