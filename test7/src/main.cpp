@@ -129,10 +129,8 @@ void createFallbackTextures()
 
 void createScene()
 {
-    //bool res = loadGltfFile("../data/colored-spheres.gltf", &app.scene);
-    //bool res = loadGltfFile("../data/shadow-test2.gltf", &app.scene);
-    //bool res = loadGltfFile(vk, "../data/misc-boxes.gltf", &app.scene);
-    bool res = loadGltfFile(vk, "../data/reflection-test1.gltf", &app.scene);
+    //bool res = loadGltfFile(vk, "../data/reflection-test1.gltf", &app.scene);
+    bool res = loadGltfFile(vk, "../data/backface2.gltf", &app.scene);
     BASSERT(res);
 
     // BONI TODO: this doesn't handle child nodes

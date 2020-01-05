@@ -266,6 +266,9 @@ static void loadMaterials(DeviceVulkan& vk, tinygltf::Model& model, Scene* pScen
 
         readVec4(pbr.baseColorFactor, &mat.baseColorFactor, glm::vec4(1.f));
 
+        mat.metalness = (float)pbr.metallicFactor;
+        mat.roughness = (float)pbr.roughnessFactor;
+
         int baseColorID = pbr.baseColorTexture.index;
 
         VkImageView baseColorView = baseColorID >= 0 ?

@@ -15,6 +15,8 @@ struct InstanceData
 struct Material
 {
     vec4 baseColorFactor;
+    float metalness;
+    float roughness;
 };
 
 layout(set = 0, binding = 0) uniform accelerationStructureNV Scene;
@@ -120,16 +122,32 @@ void main()
     // BONI TODO: remove these if checks by having defaults
     if (materialID >= 0)
     {
-        vec3 baseColorFactor = Materials.m[materialID].baseColorFactor.rgb;
-
         vec3 baseColorSample = texture(sampler2D(BaseColorTextures[materialID], LinearSampler), uv).rgb;
-
         baseColorSample = srgbToLinear(baseColorSample);
 
-        baseColor = baseColorSample * baseColorFactor;
+        Material m = Materials.m[materialID];
+        baseColor = baseColorSample * m.baseColorFactor.rgb;
+
+        if (m.roughness == 0.)
+            baseColor = vec3(1,0,0);
     }
 
     vec3 N = getNormalWS(faceIndex, barycentric);
+
+    bool inside = false;
+
+    if (dot(N, gl_WorldRayDirectionNV) > 0)
+    {
+        N = -N;
+        inside = true;
+    }
+
+    // if (dot(N, gl_WorldRayDirectionNV) > 0)
+    // {
+    //     PrimaryRay.color_distance = vec4(vec3(0,0,1), gl_HitTNV);
+    //     PrimaryRay.normal = vec4(N, 0.);
+    //     return;
+    // }
 
     vec3 L = normalize(vec3(1., 1., 1.));
 
@@ -137,17 +155,22 @@ void main()
 
     vec3 color = vec3(ndotl * baseColor + 0.1);
 
+    if (inside)
+    {
+        color = vec3(0,0,1);
+    }
+
     PrimaryRay.depth += 1;
 
     if (baseColor.r < 1.0 && PrimaryRay.depth < kMaxDepth)
     {
         vec3 hitPos = gl_WorldRayOriginNV + gl_WorldRayDirectionNV * gl_HitTNV;
-        vec3 origin = hitPos + N * 0.001;
+        vec3 origin = hitPos + N * 0.01;
         vec3 dir = reflect(gl_WorldRayDirectionNV, N);
 
         uint flags = gl_RayFlagsOpaqueNV;
 
-        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
+        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 5.001, dir, 1000, 0);
 
         PrimaryRay.color_distance.rgb *= color;
     }
