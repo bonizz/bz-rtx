@@ -140,6 +140,7 @@ void createScene()
     std::vector<VkGeometryNV> geometries(meshCount); // needs to exist when blas is built
     std::vector<VkGeometryInstance> instances(meshCount);
 
+    app.scene.positionsBufferInfos.resize(meshCount);
     app.scene.normalsBufferInfos.resize(meshCount);
     app.scene.uvsBufferInfos.resize(meshCount);
     app.scene.indicesBufferInfos.resize(nodesCount);
@@ -206,6 +207,11 @@ void createScene()
         instance.instanceOffset = 0;
         instance.flags = 0; // VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
         instance.accelerationStructureHandle = mesh.blas.handle;
+
+        VkDescriptorBufferInfo& positionsBufferInfo = app.scene.positionsBufferInfos[i];
+        positionsBufferInfo.buffer = mesh.positions.buffer;
+        positionsBufferInfo.offset = 0;
+        positionsBufferInfo.range = mesh.positions.size;
 
         VkDescriptorBufferInfo& normalsBufferInfo = app.scene.normalsBufferInfos[i];
         normalsBufferInfo.buffer = mesh.normals.buffer;
@@ -332,19 +338,22 @@ void createDescriptorSetLayouts()
     //   Binding 3 -> MeshInstanceData[] (per instance)
     //   Binding 4 -> Material[] (material count)
 
-    // Set 1: float[3] normalsArrays[] (per instance)
+    // Set 1: float[3] positionsArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    // Set 2: vec2 uvsArray[] (per instance)
+    // Set 2: float[3] normalsArrays[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    // Set 3: uint indicesArrays[] (per instance)
+    // Set 3: vec2 uvsArray[] (per instance)
     //   Binding 0-N, where N = mesh count
 
-    // Set 4:
+    // Set 4: uint indicesArrays[] (per instance)
+    //   Binding 0-N, where N = mesh count
+
+    // Set 5:
     //   Binding 0: linear sampler
     //   Binding 1: texture2d baseColorTextures[] (material count)
-    const int numDescriptorSets = 5;
+    const int numDescriptorSets = 6;
 
     app.descriptorSetLayouts.resize(numDescriptorSets);
 
@@ -394,7 +403,7 @@ void createDescriptorSetLayouts()
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set0LayoutInfo, nullptr,
         &app.descriptorSetLayouts[0]));
 
-    // Set 1: vec4 normalsArrays[]
+    // Set 1: vec4 positionsArrays[]
     //   Binding 0-N, where N = mesh count
 
     const VkDescriptorBindingFlagsEXT flags = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT;
@@ -419,19 +428,26 @@ void createDescriptorSetLayouts()
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
         &app.descriptorSetLayouts[1]));
 
-    // Set 2: float[2] uvsArray[] (per instance)
+    // Set 2: float[2] normals[] (per instance)
     //   Binding 0-N, where N = mesh count
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
         &app.descriptorSetLayouts[2]));
 
-    // Set 3: uint indicesArrays[] (per instance)
+
+    // Set 3: float[2] uvsArray[] (per instance)
     //   Binding 0-N, where N = mesh count
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
         &app.descriptorSetLayouts[3]));
 
-    // Set 4:
+    // Set 4: uint indicesArrays[] (per instance)
+    //   Binding 0-N, where N = mesh count
+
+    VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set1LayoutInfo, nullptr,
+        &app.descriptorSetLayouts[4]));
+
+    // Set 5:
     //   Binding 0: linear sampler
     //   Binding 1: texture2d Textures[]
 
@@ -458,7 +474,7 @@ void createDescriptorSetLayouts()
     set4LayoutInfo.pBindings = set4Bindings;
 
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &set4LayoutInfo, nullptr,
-        &app.descriptorSetLayouts[4]));
+        &app.descriptorSetLayouts[5]));
 }
 
 void createRaytracingPipeline()
@@ -601,12 +617,14 @@ void createDescriptorSets()
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // MeshInstanceData[]
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // Material[]
         // set 1
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // positions
         // set 2
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // uvs
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // normals
         // set 3
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // uvs
         // set 4
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, meshCount }, // indices
+        // set 5
         { VK_DESCRIPTOR_TYPE_SAMPLER, 1 },  // linear sampler
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             (uint32_t)app.scene.baseColorTextureInfos.size() }, // baseColorTextures[]
@@ -621,10 +639,11 @@ void createDescriptorSets()
 
     std::vector<uint32_t> variableDescriptorCounts = {
         1, // set 0
-        meshCount, // set 1: normals
-        meshCount, // set 2: uvs
-        meshCount, // set 3: indices
-        1, // set 4 sampler/textures
+        meshCount, // set 1: positions
+        meshCount, // set 2: normals
+        meshCount, // set 3: uvs
+        meshCount, // set 4: indices
+        1, // set 5 sampler/textures
     };
 
     VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountInfo = {};
@@ -709,8 +728,17 @@ void createDescriptorSets()
     materialBufferWrite.pBufferInfo = &materialBufferInfo;
     materialBufferWrite.pTexelBufferView = nullptr;
 
+    VkWriteDescriptorSet positionsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    positionsBufferWrite.dstSet = app.descriptorSets[1];
+    positionsBufferWrite.dstBinding = 0;
+    positionsBufferWrite.descriptorCount = meshCount;
+    positionsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    positionsBufferWrite.pImageInfo = nullptr;
+    positionsBufferWrite.pBufferInfo = app.scene.positionsBufferInfos.data();
+    positionsBufferWrite.pTexelBufferView = nullptr;
+
     VkWriteDescriptorSet normalsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    normalsBufferWrite.dstSet = app.descriptorSets[1];
+    normalsBufferWrite.dstSet = app.descriptorSets[2];
     normalsBufferWrite.dstBinding = 0;
     normalsBufferWrite.descriptorCount = meshCount;
     normalsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -719,7 +747,7 @@ void createDescriptorSets()
     normalsBufferWrite.pTexelBufferView = nullptr;
 
     VkWriteDescriptorSet uvsBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    uvsBufferWrite.dstSet = app.descriptorSets[2];
+    uvsBufferWrite.dstSet = app.descriptorSets[3];
     uvsBufferWrite.dstBinding = 0;
     uvsBufferWrite.descriptorCount = meshCount;
     uvsBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -728,7 +756,7 @@ void createDescriptorSets()
     uvsBufferWrite.pTexelBufferView = nullptr;
 
     VkWriteDescriptorSet indicesBufferWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    indicesBufferWrite.dstSet = app.descriptorSets[3];
+    indicesBufferWrite.dstSet = app.descriptorSets[4];
     indicesBufferWrite.dstBinding = 0;
     indicesBufferWrite.descriptorCount = meshCount;
     indicesBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -742,6 +770,7 @@ void createDescriptorSets()
         camdataBufferWrite,
         meshInstanceDataBufferWrite,
         materialBufferWrite,
+        positionsBufferWrite,
         normalsBufferWrite,
         uvsBufferWrite,
         indicesBufferWrite
@@ -751,7 +780,7 @@ void createDescriptorSets()
     linearSamplerImageInfo.sampler = app.scene.linearSampler;
 
     VkWriteDescriptorSet samplerWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    samplerWrite.dstSet = app.descriptorSets[4];
+    samplerWrite.dstSet = app.descriptorSets[5];
     samplerWrite.dstBinding = 0;
     samplerWrite.descriptorCount = 1;
     samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -760,7 +789,7 @@ void createDescriptorSets()
     samplerWrite.pTexelBufferView = nullptr;
 
     VkWriteDescriptorSet baseColorTexturesWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    baseColorTexturesWrite.dstSet = app.descriptorSets[4];
+    baseColorTexturesWrite.dstSet = app.descriptorSets[5];
     baseColorTexturesWrite.dstBinding = 1;
     baseColorTexturesWrite.descriptorCount = (uint32_t)app.scene.baseColorTextureInfos.size();
     baseColorTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;

@@ -23,12 +23,13 @@ layout(set = 0, binding = 0) uniform accelerationStructureNV Scene;
 layout(set = 0, binding = 3) readonly buffer MeshInstanceDataBuffer { InstanceData d[]; } MeshInstanceData;
 layout(set = 0, binding = 4) readonly buffer MaterialsBuffer { Material m[]; } Materials;
 
-layout(set = 1, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
-layout(set = 2, binding = 0) readonly buffer UvsBuffer { vec2 uv[]; } Uvs[];
-layout(set = 3, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
+layout(set = 1, binding = 0) readonly buffer PositionsBuffer { float p[]; } Positions[];
+layout(set = 2, binding = 0) readonly buffer NormalsBuffer { float n[]; } Normals[];
+layout(set = 3, binding = 0) readonly buffer UvsBuffer { vec2 uv[]; } Uvs[];
+layout(set = 4, binding = 0) readonly buffer IndicesBuffer { uint i[]; } Indices[];
 
-layout(set = 4, binding = 0) uniform sampler LinearSampler;
-layout(set = 4, binding = 1) uniform texture2D BaseColorTextures[];
+layout(set = 5, binding = 0) uniform sampler LinearSampler;
+layout(set = 5, binding = 1) uniform texture2D BaseColorTextures[];
 
 layout(location = 0) rayPayloadInNV RayPayload PrimaryRay;
 
@@ -73,12 +74,28 @@ uvec3 getFaceIndex()
     return f;
 }
 
+vec3 getOnePosition(uint index)
+{
+    vec3 p;
+    p.x = Positions[gl_InstanceID].p[3 * index + 0];
+    p.y = Positions[gl_InstanceID].p[3 * index + 1];
+    p.z = Positions[gl_InstanceID].p[3 * index + 2];
+    return p;
+}
+
+vec3 getGeometricNormalWS(uvec3 faceIndex)
+{
+    vec3 p0 = getOnePosition(faceIndex.x);
+    vec3 p1 = getOnePosition(faceIndex.y);
+    vec3 p2 = getOnePosition(faceIndex.z);
+
+    vec3 geoN = normalize(cross(p1 - p0, p2 - p0));
+
+    return normalize(vec3(gl_ObjectToWorldNV * vec4(geoN, 0.)));
+}
+
 vec3 getOneNormal(uint index)
 {
-    // vec3 n0 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.x].xyz;
-    // vec3 n1 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.y].xyz;
-    // vec3 n2 = Normals[nonuniformEXT(gl_InstanceID)].n[ind.z].xyz;
-
     vec3 n;
     n.x = Normals[gl_InstanceID].n[3 * index + 0];
     n.y = Normals[gl_InstanceID].n[3 * index + 1];
@@ -132,11 +149,13 @@ void main()
             baseColor = vec3(1,0,0);
     }
 
+    vec3 geoN = getGeometricNormalWS(faceIndex);
+
     vec3 N = getNormalWS(faceIndex, barycentric);
 
     bool inside = false;
 
-    if (dot(N, gl_WorldRayDirectionNV) > 0)
+    if (dot(geoN, gl_WorldRayDirectionNV) > 0)
     {
         N = -N;
         inside = true;
