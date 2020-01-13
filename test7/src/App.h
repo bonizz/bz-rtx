@@ -32,11 +32,13 @@ struct Mesh
     AccelerationStructureVulkan blas;
 };
 
+// Keep this padded to 16 bytes
 struct Material
 {
     glm::vec4 baseColorFactor;
     float metalness;
     float roughness;
+    float pad[2];
 };
 
 struct CameraUniformData

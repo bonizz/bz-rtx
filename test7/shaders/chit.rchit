@@ -17,6 +17,7 @@ struct Material
     vec4 baseColorFactor;
     float metalness;
     float roughness;
+    float pad[2];
 };
 
 layout(set = 0, binding = 0) uniform accelerationStructureNV Scene;
@@ -147,6 +148,9 @@ void main()
 
         if (m.roughness == 0.)
             baseColor = vec3(1,0,0);
+
+        if (m.baseColorFactor.a < 0.5)
+            baseColor = vec3(0,0,0);
     }
 
     vec3 geoN = getGeometricNormalWS(faceIndex);
@@ -189,7 +193,7 @@ void main()
 
         uint flags = gl_RayFlagsOpaqueNV;
 
-        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 5.001, dir, 1000, 0);
+        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
 
         PrimaryRay.color_distance.rgb *= color;
     }
