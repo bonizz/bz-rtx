@@ -137,6 +137,8 @@ void main()
     int materialID = MeshInstanceData.d[gl_InstanceID].materialID;
     vec2 uv = getUv(faceIndex, barycentric);
 
+    bool transmissive = false;
+
     // BONI TODO: remove these if checks by having defaults
     if (materialID >= 0)
     {
@@ -146,11 +148,12 @@ void main()
         Material m = Materials.m[materialID];
         baseColor = baseColorSample * m.baseColorFactor.rgb;
 
-        if (m.roughness == 0.)
-            baseColor = vec3(1,0,0);
+        // if (m.roughness == 0.)
+        //     baseColor = vec3(1,0,0);
 
+        // Treat as transmissive
         if (m.baseColorFactor.a < 0.5)
-            baseColor = vec3(0,0,0);
+            transmissive = true;
     }
 
     vec3 geoN = getGeometricNormalWS(faceIndex);
@@ -185,11 +188,30 @@ void main()
 
     PrimaryRay.depth += 1;
 
-    if (baseColor.r < 1.0 && PrimaryRay.depth < kMaxDepth)
+    if ((baseColor.r < 1.0 || transmissive)
+     && PrimaryRay.depth < kMaxDepth)
     {
         vec3 hitPos = gl_WorldRayOriginNV + gl_WorldRayDirectionNV * gl_HitTNV;
         vec3 origin = hitPos + N * 0.01;
-        vec3 dir = reflect(gl_WorldRayDirectionNV, N);
+
+        vec3 dir;
+
+        // BONI TODO: transmissive should compute both transmission and
+        // reflection, but for now we'll just compute the transmissive portion
+        if (transmissive)
+        {
+            // http://hyperphysics.phy-astr.gsu.edu/hbase/Tables/indrf.html
+            // Air -> Heavy flint glass (1.0029 / 1.65 == 0.607818)
+            // hmm ... I wonder if I can just use the opacity value as the
+            // IOR ratio??
+
+            dir = refract(normalize(gl_WorldRayDirectionNV), N, 0.607818);
+        }
+        else
+        {
+            dir = reflect(gl_WorldRayDirectionNV, N);
+        }
+
 
         uint flags = gl_RayFlagsOpaqueNV;
 
