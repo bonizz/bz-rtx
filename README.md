@@ -79,3 +79,4 @@ Refs:
 - https://stackoverflow.com/questions/20801561/glsl-refract-function-explanation-available
 - https://raytracing.github.io/books/RayTracingInOneWeekend.html#dielectrics
 - https://github.com/GPSnoopy/RayTracingInVulkan
+- https://www.youtube.com/watch?v=xpxVAoXaVgg (Reboot Red Vulkan RTX)
