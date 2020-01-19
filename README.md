@@ -68,3 +68,14 @@ Textures
 Adds a trace call from hit shader for non-red materials.
 
 ![image](https://user-images.githubusercontent.com/4008312/71643191-28737700-2c6b-11ea-9ac0-506082b964ef.png)
+
+### 07-sample-reflection
+
+Refraction.  Spheres in image are glass balls.  Uses recursive traceNV calls which should go away in next sample.
+
+![image](https://user-images.githubusercontent.com/4008312/72675907-0e45e100-3a40-11ea-9e80-4e1eff138dc8.png)
+
+Refs:
+- https://stackoverflow.com/questions/20801561/glsl-refract-function-explanation-available
+- https://raytracing.github.io/books/RayTracingInOneWeekend.html#dielectrics
+- https://github.com/GPSnoopy/RayTracingInVulkan
