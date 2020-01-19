@@ -1,8 +1,8 @@
-workspace "test7"
+workspace "sample-refraction"
     configurations { "Debug", "Release" }
     platforms { "Win64" }
 
-project "test7"
+project "sample-refraction"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++17"
