@@ -575,7 +575,7 @@ void createRaytracingPipeline()
     rayPipelineInfo.pStages = stages;
     rayPipelineInfo.groupCount = (uint32_t)std::size(groups);
     rayPipelineInfo.pGroups = groups;
-    rayPipelineInfo.maxRecursionDepth = 5; // hmm, what does this do?!?!  It does not seem to limit the trace call in the shader!?!
+    rayPipelineInfo.maxRecursionDepth = 8; // hmm, what does this do?!?!  It does not seem to limit the trace call in the shader!?!
     rayPipelineInfo.layout = app.pipelineLayout;
 
     BASSERT(rayPipelineInfo.maxRecursionDepth < vk.rtProps.maxRecursionDepth);

@@ -5,7 +5,7 @@
 
 #include "shader-common.h"
 
-const int kMaxDepth = 4;
+const int kMaxDepth = 8;
 
 struct InstanceData
 {
@@ -168,7 +168,7 @@ void main()
         inside = true;
     }
 
-    // if (dot(N, gl_WorldRayDirectionNV) > 0)
+    // if (inside)
     // {
     //     PrimaryRay.color_distance = vec4(vec3(0,0,1), gl_HitTNV);
     //     PrimaryRay.normal = vec4(N, 0.);
@@ -179,12 +179,14 @@ void main()
 
     float ndotl = max(0., dot(N, L));
 
-    vec3 color = vec3(ndotl * baseColor + 0.1);
 
     if (inside)
     {
-        color = vec3(0,0,1);
+        // color = vec3(0,0,1);
+        ndotl = 1.0;
     }
+
+    vec3 color = vec3(ndotl * baseColor + 0.1);
 
     PrimaryRay.depth += 1;
 
@@ -192,7 +194,7 @@ void main()
      && PrimaryRay.depth < kMaxDepth)
     {
         vec3 hitPos = gl_WorldRayOriginNV + gl_WorldRayDirectionNV * gl_HitTNV;
-        vec3 origin = hitPos + N * 0.01;
+        vec3 origin;
 
         vec3 dir;
 
@@ -205,19 +207,50 @@ void main()
             // hmm ... I wonder if I can just use the opacity value as the
             // IOR ratio??
 
-            dir = refract(normalize(gl_WorldRayDirectionNV), N, 0.607818);
+            float eta = 1.0029 / 1.65; // air -> glass
+
+            vec3 worldDir = normalize(gl_WorldRayDirectionNV);
+
+            float dirDotN = dot(worldDir, N);
+
+            eta = inside ? 1.0 / eta : eta;
+
+            origin = hitPos;
+            dir = refract(worldDir, N, eta);
+
+            float chk = dot(dir, vec3(1));
+
+            if (abs(chk) > 0.)
+            {
+                uint flags = gl_RayFlagsOpaqueNV;
+                traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
+
+                PrimaryRay.color_distance.rgb *= color;
+            }
+            else
+            {
+                // Total Internal Reflection
+                PrimaryRay.color_distance.rgb = vec3(0);
+
+                origin = hitPos + N * 0.01;
+                dir = reflect(gl_WorldRayDirectionNV, N);
+
+                uint flags = gl_RayFlagsOpaqueNV;
+                traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
+
+                PrimaryRay.color_distance.rgb *= color;
+            }
         }
         else
         {
+            origin = hitPos + N * 0.01;
             dir = reflect(gl_WorldRayDirectionNV, N);
+
+            uint flags = gl_RayFlagsOpaqueNV;
+            traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
+
+            PrimaryRay.color_distance.rgb *= color;
         }
-
-
-        uint flags = gl_RayFlagsOpaqueNV;
-
-        traceNV(Scene, flags, 0xFF, 0, 0, 0, origin, 0.001, dir, 1000, 0);
-
-        PrimaryRay.color_distance.rgb *= color;
     }
     else
     {
