@@ -69,7 +69,7 @@ Adds a trace call from hit shader for non-red materials.
 
 ![image](https://user-images.githubusercontent.com/4008312/71643191-28737700-2c6b-11ea-9ac0-506082b964ef.png)
 
-### 07-sample-reflection
+### 07-sample-refraction
 
 Refraction.  Spheres in image are glass balls.  Uses recursive traceNV calls which should go away in next sample.
 
