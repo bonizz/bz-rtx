@@ -1,5 +1,14 @@
 # Vulkan RTX samples
 
+```
+Update 12/21/20
+
+I plan to update these samples, migrating to the official extensions and cleaning up the code.
+
+For now I'm archiving this repo until I get to it.
+
+```
+
 
 | Sample  | Screenshot |
 | ------------- | ------------- |
